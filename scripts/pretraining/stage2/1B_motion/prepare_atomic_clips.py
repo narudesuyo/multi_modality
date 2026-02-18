@@ -35,7 +35,7 @@ except ImportError:
         print()
 
 # ── paths ──────────────────────────────────────────────────────────────
-DATA_ROOT = "/large/naru/EgoHand/data"
+DATA_ROOT = os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data")
 ATOMIC_DESC_PATH = os.path.join(DATA_ROOT, "description", "atomic_descriptions_train.json")
 TAKES_JSON_PATH = os.path.join(DATA_ROOT, "ee4d", "ee4d_motion_uniegomotion", "takes.json")
 MOTION_PT_PATH = os.path.join(

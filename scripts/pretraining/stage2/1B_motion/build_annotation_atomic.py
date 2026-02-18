@@ -17,7 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-DATA_ROOT = "/large/naru/EgoHand/data/train/takes_clipped/egoexo"
+DATA_ROOT = os.path.join(os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data"), "train/takes_clipped/egoexo")
 TOK_POSE_DIR = os.path.join(DATA_ROOT, "tok_pose_atomic_40")
 
 
