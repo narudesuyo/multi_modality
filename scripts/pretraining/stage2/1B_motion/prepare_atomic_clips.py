@@ -21,18 +21,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    def tqdm(iterable, **kwargs):
-        desc = kwargs.get("desc", "")
-        total = kwargs.get("total", None)
-        for i, item in enumerate(iterable):
-            if i % 100 == 0:
-                msg = f"\r{desc}: {i}" + (f"/{total}" if total else "")
-                print(msg, end="", flush=True)
-            yield item
-        print()
+from tqdm import tqdm
 
 # ── paths ──────────────────────────────────────────────────────────────
 DATA_ROOT = os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data")
