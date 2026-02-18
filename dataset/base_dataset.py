@@ -18,7 +18,7 @@ class BaseDataset(Dataset):
     media_type = "video"
 
     def __init__(self):
-        assert self.media_type in ["audio", "image", "video", "audio_video"]
+        assert self.media_type in ["audio", "image", "video", "audio_video", "video_motion"]
         self.data_root = None
         self.data_root_prefix = ""
         self.anno_list = (
@@ -64,7 +64,7 @@ class BaseDataset(Dataset):
                 return self.load_and_transform_media_data_image(index, data_path)
             elif self.media_type == "audio":
                 return self.load_and_transform_media_data_audio(index, data_path)
-            elif self.media_type == "video":
+            elif self.media_type in ("video", "video_motion"):
                 return self.load_and_transform_media_data_video(index, data_path)
             elif self.media_type == "audio_video":
                 return self.load_and_transform_media_data_audio_video(index, data_path)

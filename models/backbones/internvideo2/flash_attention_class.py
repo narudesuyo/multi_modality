@@ -3,8 +3,12 @@ import torch.nn as nn
 
 from einops import rearrange
 
-from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func
-from flash_attn.bert_padding import unpad_input, pad_input
+try:
+    from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func
+    from flash_attn.bert_padding import unpad_input, pad_input
+    HAS_FLASH_ATTN = True
+except ImportError:
+    HAS_FLASH_ATTN = False
 
 
 class FlashAttention(nn.Module):
@@ -20,6 +24,8 @@ class FlashAttention(nn.Module):
 
     def __init__(self, softmax_scale=None, attention_dropout=0.0, device=None, dtype=None):
         super().__init__()
+        if not HAS_FLASH_ATTN:
+            raise ImportError("flash_attn is required for FlashAttention but not installed.")
         self.softmax_scale = softmax_scale
         self.dropout_p = attention_dropout
 

@@ -18,22 +18,62 @@ def log_dict_to_wandb(log_dict, step, prefix=""):
     """include a separator `/` at the end of `prefix`"""
     if not is_main_process():
         return
+    if wandb.run is None:
+        return
 
     log_dict = {f"{prefix}{k}": v for k, v in log_dict.items()}
     wandb.log(log_dict, step)
 
 
+def _config_to_wandb_dict(obj):
+    """Convert config (EasyDict/dict) to JSON-serializable dict for wandb."""
+    if obj is None:
+        return None
+    if hasattr(obj, "items"):  # dict, EasyDict
+        return {str(k): _config_to_wandb_dict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_config_to_wandb_dict(v) for v in obj]
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+    # Fallback: convert to str for non-serializable types
+    try:
+        import json
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
+
+
 def setup_wandb(config):
     if not (config.wandb.enable and is_main_process()):
-        return
+        return None
 
-    run = wandb.init(
-        config=config,
+    # Build wandb-safe config dict (EasyDict/OmegaConf may not be JSON-serializable)
+    config_dict = _config_to_wandb_dict(dict(config))
+
+    init_kwargs = dict(
+        config=config_dict,
         project=config.wandb.project,
-        entity=config.wandb.entity,
-        name=os.path.basename(config.output_dir),
-        reinit=True
+        name=os.path.basename(config.output_dir) if config.output_dir else "run",
+        reinit=True,
     )
+    if getattr(config.wandb, "entity", None):
+        init_kwargs["entity"] = config.wandb.entity
+    if config.output_dir:
+        init_kwargs["dir"] = config.output_dir
+    # WANDB_MODE: "offline" = no login needed, saves locally. "online" = sync to wandb.ai
+    if os.environ.get("WANDB_MODE"):
+        init_kwargs["mode"] = os.environ["WANDB_MODE"]
+
+    try:
+        run = wandb.init(**init_kwargs)
+    except Exception as e:
+        # Fallback to offline when login/network fails
+        if init_kwargs.get("mode") != "offline":
+            init_kwargs["mode"] = "offline"
+            run = wandb.init(**init_kwargs)
+        else:
+            raise e
     return run
 
 

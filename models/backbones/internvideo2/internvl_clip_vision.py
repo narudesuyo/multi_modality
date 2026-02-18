@@ -12,8 +12,16 @@ try:
     from .flash_attention_class import FlashAttention
 except:
     from flash_attention_class import FlashAttention
-from flash_attn.modules.mlp import FusedMLP
-from flash_attn.ops.rms_norm import DropoutAddRMSNorm
+
+try:
+    from flash_attn.modules.mlp import FusedMLP
+except ImportError:
+    FusedMLP = None
+
+try:
+    from flash_attn.ops.rms_norm import DropoutAddRMSNorm
+except ImportError:
+    DropoutAddRMSNorm = None
 
 
 MODEL_PATH = 'your_model_path/internvl'

@@ -150,9 +150,8 @@ def train(
             media = [audio, video]
         elif media_type == 'video_motion':
             video = media[0].to(device, dtype=cast_dtype, non_blocking=True)
-            body_motion = media[1].to(device, dtype=cast_dtype, non_blocking=True)
-            hand_motion = media[2].to(device, dtype=cast_dtype, non_blocking=True)
-            media = [video, body_motion, hand_motion]
+            motion_indices = media[1].to(device, non_blocking=True)  # LongTensor, no cast
+            media = [video, motion_indices]
         else:
             media = media.to(device, dtype=cast_dtype, non_blocking=True)
         idx = idx.to(device, non_blocking=True)
@@ -302,12 +301,15 @@ def main(config):
         print(e)
         logger.info("Ceph is not working!!!")
         
+    wandb_run = None
     if is_main_process() and config.wandb.enable:
         try:
-            run = setup_wandb(config)
-            logger.info("Wandb is working!!!")
+            wandb_run = setup_wandb(config)
+            if wandb_run is not None:
+                logger.info("Wandb is working!!!")
         except Exception as e:
             logger.warn("Wandb is not working!!!")
+            logger.warn(f"Reason: {e}")
             print(e)
 
     is_pretrain = config.mode == "pt"
@@ -327,7 +329,8 @@ def main(config):
     # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/3
     cudnn.benchmark = len(train_media_types) == 1
 
-    print(f"\033[31m CURRENT NODE NAME: {os.environ['SLURMD_NODENAME']} dataloader is OK {datetime.datetime.now().strftime('%Y-%m-%d-%H_%M_%S')}!!! \033[0m")
+    node_name = os.environ.get('SLURMD_NODENAME', 'local')
+    print(f"\033[31m CURRENT NODE NAME: {node_name} dataloader is OK {datetime.datetime.now().strftime('%Y-%m-%d-%H_%M_%S')}!!! \033[0m")
 
     find_unused_parameters = config.model.get('find_unused_parameters', False)
     logger.info(f"find_unused_parameters={find_unused_parameters}")
@@ -350,11 +353,12 @@ def main(config):
         find_unused_parameters=find_unused_parameters,
     )
 
-    if is_main_process() and config.wandb.enable:
+    if is_main_process() and wandb_run is not None:
         try:
             wandb.watch(model)
         except Exception as e:
             logger.warn("Wandb is not working!!!")
+            logger.warn(f"Reason: {e}")
             print(e)
 
     best = 0
@@ -556,17 +560,19 @@ def main(config):
     logger.info(f"best epoch {best_epoch} [best_key {best_key}]")
     logger.info(f"Checkpoints and Logs saved at {config.output_dir}")
 
-    if is_main_process() and config.wandb.enable:
+    if is_main_process() and wandb_run is not None:
         try:
-            run.finish()
+            wandb_run.finish()
         except Exception as e:
             logger.warn("Wandb is not working!!!")
+            logger.warn(f"Reason: {e}")
             print(e)
 
 
 if __name__ == "__main__":
-    print(f"\033[31m NODE LIST: {os.environ['SLURM_NODELIST']} \033[0m")
-    logger.info(f"NODE LIST: {os.environ['SLURM_NODELIST']}")
+    if 'SLURM_NODELIST' in os.environ:
+        print(f"\033[31m NODE LIST: {os.environ['SLURM_NODELIST']} \033[0m")
+        logger.info(f"NODE LIST: {os.environ['SLURM_NODELIST']}")
     cfg = setup_main()
     local_broadcast_process_authkey()
     main(cfg)

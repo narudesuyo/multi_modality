@@ -1,4 +1,5 @@
 # local #
+.conda/
 tmp*/
 cache/*
 */cache*/
@@ -23,6 +24,7 @@ mix_ckpt/
 *.rar
 *.tar
 *.zip
+*.json
 
 # Logs and databases #
 *.sql

@@ -1,24 +1,27 @@
+import os as _os
 from configs.data import *
 from configs.model import *
+
+# ========================= path resolution ==========================
+_HERE = _os.path.dirname(_os.path.abspath(__file__))           # .../scripts/pretraining/stage2/1B_motion
+_WORK_DIR = _os.path.abspath(_os.path.join(_HERE, "../../../.."))  # multi_modality root
+_EGOHAND_DIR = _os.path.abspath(_os.path.join(_WORK_DIR, "../../.."))  # 3 levels up = EgoHand
+_DATA_ROOT = _os.environ.get("DATA_ROOT", _os.path.join(_EGOHAND_DIR, "data"))
 
 # ========================= data ==========================
 # Register video_motion dataset
 available_corpus["video_motion_train"] = dict(
-    anno_path="your_annotation.json",  # TODO: set your annotation json path
-    data_root="",
-    motion_data_root="",  # TODO: set your motion data root
+    anno_path=_os.path.join(_HERE, "annotation_atomic_final.json"),
+    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
     media_type="video_motion",
     normalize_motion=False,
-    # motion_mean_path="./preprocess/statistics/tips/mean.npy",  # uncomment if normalizing
-    # motion_std_path="./preprocess/statistics/tips/std.npy",
 )
 
 train_file = [available_corpus["video_motion_train"]]
 
-test_file = dict(
-    msrvtt_1k_test=available_corpus["msrvtt_1k_test"],
-)
-test_types = ["msrvtt_1k_test"]
+test_file = dict()
+test_types = []
 num_workers = 6
 
 best_key = ["msrvtt_1k_test_match", "t2v_r1"]
@@ -26,7 +29,7 @@ best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 # ========================= input ==========================
 num_frames = 4
 num_frames_test = 4
-batch_size = 32
+batch_size = 4
 batch_size_test = 4
 max_txt_l = 32
 motion_T = 21  # motion sequence length (matching BodyTokenize)
@@ -64,12 +67,12 @@ model = dict(
         clip_norm_type='l2',
         clip_return_layer=6,
         clip_student_return_interval=1,
-        pretrained='/large/naru/EgoHand/InternVideo/InternVideo2/multi_modality/scripts/pretraining/stage1/1B_ft_k710_f8.pth',  # TODO: set Stage 1 checkpoint path
-        use_checkpoint=False,
+        pretrained=_os.path.join(_WORK_DIR, "scripts/pretraining/stage1/1B_ft_k710_f8.pth"),
+        use_checkpoint=True,
         checkpoint_num=40,
-        use_flash_attn=True,
-        use_fused_rmsnorm=True,
-        use_fused_mlp=True,
+        use_flash_attn=False,
+        use_fused_rmsnorm=False,
+        use_fused_mlp=False,
         # clip teacher (disabled for motion experiment)
         clip_teacher=None,
         clip_input_resolution=224,
@@ -96,9 +99,11 @@ model = dict(
         cnn_depth=8,
         cnn_dilation_max=8,
         d_model=768,  # output dim = contra_dim
-        ckpt_path="/large/naru/EgoHand/BodyTokenize/ckpt_vq/ckpt_best.pt",
+        ckpt_path=_os.path.join(_WORK_DIR, "../../../BodyTokenize/ckpt_vq/ckpt_best.pt"),
+        vqvae_config=_os.path.join(_EGOHAND_DIR, "BodyTokenize/ckpt_vq/config.yaml"),
         freeze=True,
     ),
+    multimodal=dict(enable=True),
     contra_dim=768,
     vm_concat_dim=768,
     temp=0.07,
@@ -161,8 +166,8 @@ compile_model = False
 
 # ========================= wandb ==========================
 wandb = dict(
-    enable=False,
-    entity="opengvlab",
+    enable=True,
+    entity="narudesuyo-waseda-university",
     project="InternVideo2-Stage2-Motion",
 )
 dist_url = "env://"

@@ -145,9 +145,8 @@ class InternVideo2_Stage2_Motion(nn.Module):
     def forward(self, media, text, idx, media_type='video'):
         if media_type == 'video_motion':
             video = media[0]
-            body_motion = media[1]
-            hand_motion = media[2]
-            return self.forward_video_motion(video, body_motion, hand_motion, text, idx)
+            motion_indices = media[1]
+            return self.forward_video_motion_indices(video, motion_indices, text, idx)
         elif media_type in ['image', 'video']:
             return self.forward_image_video(media, text, idx)
         else:
@@ -203,8 +202,8 @@ class InternVideo2_Stage2_Motion(nn.Module):
             loss_mlm=loss_mlm * self.loss_weight.mlm,
         )
 
-    def forward_video_motion(self, video, body_motion, hand_motion, text, idx):
-        """Forward for video_motion media type: video + body motion + text."""
+    def forward_video_motion_indices(self, video, motion_indices, text, idx):
+        """Forward for video_motion media type: video + tok_pose indices + text."""
         self.clip_contrastive_temperature()
 
         text_embeds, pooled_text_embeds = self.encode_text(text)
@@ -214,9 +213,9 @@ class InternVideo2_Stage2_Motion(nn.Module):
         vision_embeds, pooled_vision_embeds, student_output, student_output_final, targets_clip_middle_vis, targets_clip_final_vis = self.encode_vision(video)
         vision_proj = self.vision_proj(pooled_vision_embeds).squeeze(dim=1)
 
-        # Motion
+        # Motion (from token indices → codebook lookup)
         if self.use_motion():
-            motion_embeds, pooled_motion_embeds = self.encode_motion(body_motion, hand_motion)
+            motion_embeds, pooled_motion_embeds = self.encode_motion_from_indices(motion_indices)
             motion_proj = self.motion_proj(pooled_motion_embeds)
 
         # ---- Losses ----
@@ -425,6 +424,12 @@ class InternVideo2_Stage2_Motion(nn.Module):
 
     def encode_motion(self, body_motion, hand_motion, test=False):
         motion_embeds, pooled_motion_embeds = self.motion_encoder(body_motion, hand_motion)
+        motion_embeds = self.vm_concat_motion_proj(motion_embeds)
+        return motion_embeds, pooled_motion_embeds
+
+    def encode_motion_from_indices(self, motion_indices, test=False):
+        """Encode motion from VQ-VAE token indices via codebook lookup."""
+        motion_embeds, pooled_motion_embeds = self.motion_encoder.forward_from_indices(motion_indices)
         motion_embeds = self.vm_concat_motion_proj(motion_embeds)
         return motion_embeds, pooled_motion_embeds
 
