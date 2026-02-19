@@ -1,4 +1,4 @@
-"""Build final annotation JSON for Stage2 training from atomic clips.
+"""Build final annotation JSON for Stage2 training/val from atomic clips.
 
 Reads the intermediate annotation from prepare_atomic_clips.py and matches
 with tokenized pose files from BodyTokenize inference_atomic.py.
@@ -6,8 +6,8 @@ with tokenized pose files from BodyTokenize inference_atomic.py.
 Generates entries for both ego and exo views (as separate training samples).
 
 Usage:
-    python build_annotation_atomic.py
-    python build_annotation_atomic.py --output annotation_atomic_final.json
+    python build_annotation_atomic.py [--split {train,val}]
+    python build_annotation_atomic.py --split val --output annotation_atomic_val.json
 """
 
 import argparse
@@ -17,11 +17,10 @@ from collections import defaultdict
 from pathlib import Path
 
 
-DATA_ROOT = os.path.join(os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data"), "train/takes_clipped/egoexo")
-TOK_POSE_DIR = os.path.join(DATA_ROOT, "tok_pose_atomic_40")
+_DATA_ROOT_BASE = os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data")
 
 
-def build_annotation(intermediate_json: str, output_path: str):
+def build_annotation(intermediate_json: str, output_path: str, data_root: str):
     with open(intermediate_json, "r") as f:
         entries = json.load(f)
 
@@ -34,13 +33,15 @@ def build_annotation(intermediate_json: str, output_path: str):
         "no_video": 0,
     }
 
+    tok_pose_dir_base = os.path.join(data_root, "tok_pose_atomic_40")
+
     for entry in entries:
         take_name = entry["take_name"]
         sample_id = entry["sample_id"]
         caption = entry["caption"]
 
         # Find tokenized pose chunks for this sample
-        tok_pose_dir = os.path.join(TOK_POSE_DIR, take_name)
+        tok_pose_dir = os.path.join(tok_pose_dir_base, take_name)
         tok_pose_files = []
         if os.path.isdir(tok_pose_dir):
             for fname in sorted(os.listdir(tok_pose_dir)):
@@ -57,7 +58,7 @@ def build_annotation(intermediate_json: str, output_path: str):
 
             # Ego view
             if "video_ego" in entry:
-                video_path = os.path.join(DATA_ROOT, entry["video_ego"])
+                video_path = os.path.join(data_root, entry["video_ego"])
                 if os.path.isfile(video_path):
                     annotations.append({
                         "video": entry["video_ego"],
@@ -70,7 +71,7 @@ def build_annotation(intermediate_json: str, output_path: str):
 
             # Exo view
             if "video_exo" in entry:
-                video_path = os.path.join(DATA_ROOT, entry["video_exo"])
+                video_path = os.path.join(data_root, entry["video_exo"])
                 if os.path.isfile(video_path):
                     annotations.append({
                         "video": entry["video_exo"],
@@ -97,14 +98,24 @@ def build_annotation(intermediate_json: str, output_path: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--intermediate-json", type=str,
-                        default=os.path.join(os.path.dirname(__file__), "annotation_atomic_intermediate.json"),
+    parser.add_argument("--split", choices=["train", "val"], default="train",
+                        help="Dataset split (default: train)")
+    parser.add_argument("--intermediate-json", type=str, default=None,
                         help="Path to intermediate JSON from prepare_atomic_clips.py")
     parser.add_argument("--output", type=str, default=None,
                         help="Output annotation JSON path")
     args = parser.parse_args()
 
-    if args.output is None:
-        args.output = os.path.join(os.path.dirname(__file__), "annotation_atomic_final.json")
+    _here = os.path.dirname(__file__)
 
-    build_annotation(args.intermediate_json, args.output)
+    if args.intermediate_json is None:
+        suffix = "" if args.split == "train" else f"_{args.split}"
+        args.intermediate_json = os.path.join(_here, f"annotation_atomic_intermediate{suffix}.json")
+
+    if args.output is None:
+        name = f"annotation_atomic_{args.split}.json"
+        args.output = os.path.join(_here, name)
+
+    data_root = os.path.join(_DATA_ROOT_BASE, f"{args.split}/takes_clipped/egoexo")
+
+    build_annotation(args.intermediate_json, args.output, data_root)

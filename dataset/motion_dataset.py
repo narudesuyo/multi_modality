@@ -142,3 +142,74 @@ class VidMotionTxtPtTrainDataset(BaseDataset):
             print(e)
             index = np.random.randint(0, len(self))
             return self.__getitem__(index)
+
+
+class VidMotionTxtRetEvalDataset(BaseDataset):
+    """Eval dataset for Video + Motion + Text retrieval.
+
+    Returns ([video, motion_indices], index) per sample.
+    Exposes .text, .image, .txt2img, .img2txt for retrieval evaluation.
+    """
+
+    media_type = "video_motion"
+
+    def __init__(self, ann_file, transform, num_frames=4,
+                 video_reader_type="decord", sample_type="middle", num_tries=3):
+        super().__init__()
+
+        self.transform = transform
+        self.num_frames = num_frames
+        self.video_reader_type = video_reader_type
+        self.video_reader = VIDEO_READER_FUNCS[video_reader_type]
+        self.sample_type = sample_type
+        self.num_tries = num_tries
+        self.max_txt_l = ann_file.get("max_txt_l", 32)
+
+        self.data_root = ann_file.get("data_root", "")
+        self.motion_data_root = ann_file.get("motion_data_root", self.data_root)
+
+        anno_path = ann_file.get("anno_path")
+        with open(anno_path, "r") as f:
+            raw = json.load(f)
+        self.raw_anno_list = raw
+
+        self.text = None
+        self.image = None   # video paths (full)
+        self.tok_pose = None
+        self.txt2img = None
+        self.img2txt = None
+        self.build_data()
+
+    def build_data(self):
+        self.text = []
+        self.image = []
+        self.tok_pose = []
+        self.txt2img = {}
+        self.img2txt = {}
+
+        for idx, ann in enumerate(self.raw_anno_list):
+            self.text.append(pre_text(ann["caption"]))
+            self.image.append(os.path.join(self.data_root, ann["video"]))
+            self.tok_pose.append(os.path.join(self.motion_data_root, ann["tok_pose"]))
+            self.img2txt[idx] = [idx]
+            self.txt2img[idx] = idx
+
+        self.anno_list = [
+            {"image": v, "tok_pose": t}
+            for v, t in zip(self.image, self.tok_pose)
+        ]
+
+    def __len__(self):
+        return len(self.anno_list)
+
+    def __getitem__(self, index):
+        ann = self.anno_list[index]
+        try:
+            video, index = self.load_and_transform_media_data(index, ann["image"])
+            data = np.load(ann["tok_pose"])
+            motion_indices = torch.from_numpy(data["idx"].flatten().astype(np.int64))
+            return [video, motion_indices], index
+        except Exception as e:
+            logger.warning(f"Caught exception {e} when loading {ann}")
+            index = np.random.randint(0, len(self))
+            return self.__getitem__(index)

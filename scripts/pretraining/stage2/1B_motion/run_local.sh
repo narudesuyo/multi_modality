@@ -20,7 +20,7 @@ export MASTER_PORT=$((12000 + RANDOM % 20000))
 export OMP_NUM_THREADS=1
 export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}./"
 # wandb: default online. Set WANDB_MODE=offline for local-only logging.
-export WANDB_MODE="${WANDB_MODE:-offline}"
+export WANDB_MODE="${WANDB_MODE:-online}"
 
 # Auto-detect GPU count
 NUM_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")

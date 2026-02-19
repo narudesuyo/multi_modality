@@ -120,12 +120,14 @@ class Config(object):
         if not osp.isfile(filepath):
             raise IOError(f"File does not exist: {filepath}")
         if filepath.endswith(".py"):
+            import types
             sys.path.insert(0, osp.dirname(filepath))
             mod = import_module(osp.splitext(osp.basename(filepath))[0])
             cfg_dict = {
                 name: value
                 for name, value in mod.__dict__.items()
-                if not name.startswith("__")
+                if not name.startswith("_")
+                and not isinstance(value, (types.ModuleType, type, types.FunctionType))
             }
 
         elif filepath.endswith((".yml", ".yaml")):

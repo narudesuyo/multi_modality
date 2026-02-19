@@ -117,6 +117,53 @@ def extract_audio_feats(data_loader, model, device, config):
     pooled_audio_feats_all = torch.cat(pooled_audio_feats_all, dim=0)
     return audio_feats_all, pooled_audio_feats_all
 
+def extract_video_motion_feats(data_loader, model, device, config):
+    if config.use_half_precision:
+        cast_dtype = torch.bfloat16 if config.get('use_bf16', False) else torch.float16
+    else:
+        cast_dtype = None
+
+    image_feats_all = []
+    pooled_image_feats_all = []
+    motion_feats_all = []
+    pooled_motion_feats_all = []
+    metric_logger = MetricLogger(delimiter="  ")
+    header = "extracting video+motion feats"
+    iterator = metric_logger.log_every(data_loader, 100, header)
+    for media, _ in iterator:
+        video = media[0].to(device, dtype=cast_dtype, non_blocking=True)
+        motion_indices = media[1].to(device, non_blocking=True)
+
+        image_feat, pooled_image_feat = model.encode_vision(video, test=True)
+        if len(pooled_image_feat.shape) == 2:
+            pooled_image_feat = pooled_image_feat.unsqueeze(1)
+        if config.evaluation.eval_frame_ensemble == "concat":
+            if len(image_feat.shape) == 4:
+                image_feat = rearrange(image_feat, "b t l c -> b (t l) c").contiguous()
+            image_feat = image_feat.unsqueeze(1)
+
+        motion_feat, pooled_motion_feat = model.encode_motion_from_indices(motion_indices)
+        motion_feat = motion_feat.unsqueeze(1)
+        pooled_motion_feat = pooled_motion_feat.unsqueeze(1)
+
+        if config.evaluation.eval_offload:
+            image_feats_all.append(image_feat.cpu())
+            pooled_image_feats_all.append(pooled_image_feat.cpu())
+            motion_feats_all.append(motion_feat.cpu())
+            pooled_motion_feats_all.append(pooled_motion_feat.cpu())
+        else:
+            image_feats_all.append(image_feat)
+            pooled_image_feats_all.append(pooled_image_feat)
+            motion_feats_all.append(motion_feat)
+            pooled_motion_feats_all.append(pooled_motion_feat)
+
+    image_feats_all = torch.cat(image_feats_all, dim=0)
+    pooled_image_feats_all = torch.cat(pooled_image_feats_all, dim=0)
+    motion_feats_all = torch.cat(motion_feats_all, dim=0)
+    pooled_motion_feats_all = torch.cat(pooled_motion_feats_all, dim=0)
+    return image_feats_all, pooled_image_feats_all, motion_feats_all, pooled_motion_feats_all
+
+
 def extract_audio_vision_feats(data_loader, model, device, config):
     if config.use_half_precision: 
         if config.get('use_bf16', False):
@@ -239,7 +286,7 @@ def evaluation(model, data_loader, tokenizer, device, config):
         assert hasattr(data_loader.dataset, "subtitle") and data_loader.dataset.subtitle is not None, "You don't have subtitle to use."
 
     logger.info(f"Start evaluation for media_type={media_type}")
-    assert media_type in ['audio', 'video', 'audio_video'], f"Not implement evaluation of {media_type}"
+    assert media_type in ['audio', 'video', 'audio_video', 'video_motion'], f"Not implement evaluation of {media_type}"
 
     logger.info("Computing dual encoder features...")
     start_time = time.time()
@@ -358,9 +405,32 @@ def evaluation(model, data_loader, tokenizer, device, config):
                 match_head = model.avtm_head
             else:
                 match_head = None
+
+    elif media_type == 'video_motion':
+        image_feats, pooled_image_feats, motion_feats, pooled_motion_feats = extract_video_motion_feats(
+            data_loader, model, device, config
+        )
+        logger.info("Finished video+motion feature extraction")
+        logger.info("Computing ITC scores [dot-product]")
+        if config.evaluation.eval_offload:
+            pooled_image_feats = pooled_image_feats.to(device, non_blocking=True)
+            pooled_motion_feats = pooled_motion_feats.to(device, non_blocking=True)
+
+        i2t_scores, t2i_scores = get_sim(
+            model.vm_fusion(torch.cat([
+                model.vision_proj(pooled_image_feats),
+                model.motion_proj(pooled_motion_feats),
+            ], dim=-1)),
+            model.text_proj(text_feats[:, 0])
+        )
+
+        num_medias = len(data_loader.dataset.image)
+        media_feats = image_feats
+        match_head = model.vmtm_head if hasattr(model, "vmtm_head") else None
+
     else:
         raise NotImplementedError(media_type)
-    
+
     logger.info("Computing ITC scores [dot-product], done!")
     
     if match_head is not None:

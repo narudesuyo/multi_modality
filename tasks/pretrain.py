@@ -32,6 +32,50 @@ logger = logging.getLogger(__name__)
 ceph_ckpt_bucket = "shdd:s3://avp_ckpt"
 
 
+def _format_eval_prefix(prefix: str) -> str:
+    """Strip media-type prefix from eval metric names for cleaner wandb keys.
+
+    Examples:
+        'video_motion_val_sim'   -> 'Val_sim'
+        'video_motion_val_match' -> 'Val_match'
+        'video_motion_val_dsl'   -> 'Val_dsl'
+        'msrvtt_1k_test_sim'     -> 'msrvtt_1k_test_sim'  (unknown prefix, unchanged)
+    """
+    for mtype in ["video_motion_", "audio_video_", "video_", "image_"]:
+        if prefix.startswith(mtype):
+            rest = prefix[len(mtype):]  # e.g. "val_sim"
+            # Capitalise the split name (first segment before '_')
+            parts = rest.split("_", 1)
+            parts[0] = parts[0].capitalize()
+            return "_".join(parts)
+    return prefix
+
+
+def _format_loss_name(name: str) -> str:
+    """Convert internal loss keys to readable wandb names.
+
+    Examples:
+        'loss_vtc'   -> 'V_tc'
+        'loss_vtm'   -> 'V_tm'
+        'loss_mlm'   -> 'V_mlm'
+        'loss_uta'   -> 'V_uta'
+        'loss_mtc'   -> 'M_tc'
+        'loss_mtm'   -> 'M_tm'
+        'loss_mmlm'  -> 'M_mlm'
+        'loss_vmc'   -> 'VM_c'
+        'loss_vmtc'  -> 'VM_tc'
+        'loss_vmtm'  -> 'VM_tm'
+        'loss_vmmlm' -> 'VM_mlm'
+    """
+    _EXPLICIT_MAP = {
+        "vtc": "V_T_cont", "vtm": "V_T_match", "mlm": "V_mlm", "uta": "V_uta",
+        "mtc": "M_T_cont", "mtm": "M_T_match", "mmlm": "M_mlm",
+        "vmc": "VM_cont", "vmtc": "VM_T_cont", "vmtm": "VM_T_match", "vmmlm": "VM_mlm",
+    }
+    key = name[len("loss_"):] if name.startswith("loss_") else name
+    return _EXPLICIT_MAP.get(key, key)
+
+
 def train(
     model,
     train_loaders,
@@ -78,7 +122,7 @@ def train(
     for name in loss_names:
         for m in media_types:
             metric_logger.add_meter(
-                f"{m}-{name}", SmoothedValue(window=100, fmt="{value:.4f}")
+                _format_loss_name(name), SmoothedValue(window=100, fmt="{value:.4f}")
             )
 
     header = f"Train Epoch: [{epoch}]"
@@ -215,7 +259,7 @@ def train(
             if name in loss_dict.keys():
                 value = loss_dict[name]
                 value = value if isinstance(value, float) else value.item()
-                metric_logger.update(**{f"{media_type}-{name}": value})
+                metric_logger.update(**{_format_loss_name(name): value})
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(temperature=model_without_ddp.temp.item())
 
@@ -487,7 +531,7 @@ def main(config):
                     if config.wandb.enable:
                         try:
                             for p, v in eval_res.items():
-                                log_dict_to_wandb(v, step=global_step, prefix=p)
+                                log_dict_to_wandb(v, step=global_step, prefix=_format_eval_prefix(p))
                         except Exception as e:
                             logger.warn("Wandb is not working!!!")
                             print(e)

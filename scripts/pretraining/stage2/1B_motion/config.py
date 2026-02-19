@@ -11,17 +11,25 @@ _DATA_ROOT = _os.environ.get("DATA_ROOT", _os.path.join(_EGOHAND_DIR, "data"))
 # ========================= data ==========================
 # Register video_motion dataset
 available_corpus["video_motion_train"] = dict(
-    anno_path=_os.path.join(_HERE, "annotation_atomic_final.json"),
+    anno_path=_os.path.join(_HERE, "annotation_atomic_train.json"),
     data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
     motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
     media_type="video_motion",
     normalize_motion=False,
 )
 
+available_corpus["video_motion_val"] = dict(
+    anno_path=_os.path.join(_HERE, "annotation_atomic_val.json"),
+    data_root=_os.path.join(_DATA_ROOT, "val/takes_clipped/egoexo"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "val/takes_clipped/egoexo"),
+    media_type="video_motion",
+    normalize_motion=False,
+)
+
 train_file = [available_corpus["video_motion_train"]]
 
-test_file = dict()
-test_types = []
+test_file = dict(video_motion_val=available_corpus["video_motion_val"])
+test_types = ["video_motion_val"]
 num_workers = 6
 
 best_key = ["msrvtt_1k_test_match", "t2v_r1"]
@@ -88,17 +96,7 @@ model = dict(
     ),
     text_encoder="${TextEncoders[${text_enc}]}",
     motion_encoder=dict(
-        body_in_dim=263,
-        hand_in_dim=480,
-        code_dim=256,
-        body_tokens_per_t=4,
-        hand_tokens_per_t=4,
-        num_frames=21,
-        temporal_compress=1,
-        cnn_width=256,
-        cnn_depth=8,
-        cnn_dilation_max=8,
-        d_model=768,  # output dim = contra_dim
+        d_model=768,
         ckpt_path=_os.path.join(_WORK_DIR, "../../../BodyTokenize/ckpt_vq/ckpt_best.pt"),
         vqvae_config=_os.path.join(_EGOHAND_DIR, "BodyTokenize/ckpt_vq/config.yaml"),
         freeze=True,
@@ -178,7 +176,7 @@ mode = "pt"
 output_dir = None
 resume = False
 debug = False
-log_freq = 100
+log_freq = 5
 seed = 42
 
 save_latest = True

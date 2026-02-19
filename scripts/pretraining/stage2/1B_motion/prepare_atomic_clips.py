@@ -1,13 +1,13 @@
-"""Prepare atomic-description-aligned 4-second clips for Stage2 training.
+"""Prepare atomic-description-aligned 4-second clips for Stage2 training/val.
 
 For each atomic description timestamp (±2 sec):
   1. Clip ego video from existing clipped videos
   2. Clip exo video from full takes (best_exo camera)
-  3. Extract corresponding motion kp3d from ee_train_joints_tips.pt
+  3. Extract corresponding motion kp3d from ee_{split}_joints_tips.pt
   4. Collect text descriptions
 
 Usage:
-    python prepare_atomic_clips.py [--dry-run]
+    python prepare_atomic_clips.py [--split {train,val}] [--dry-run]
 """
 
 import argparse
@@ -23,20 +23,7 @@ import torch
 
 from tqdm import tqdm
 
-# ── paths ──────────────────────────────────────────────────────────────
 DATA_ROOT = os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data")
-ATOMIC_DESC_PATH = os.path.join(DATA_ROOT, "description", "atomic_descriptions_train.json")
-TAKES_JSON_PATH = os.path.join(DATA_ROOT, "ee4d", "ee4d_motion_uniegomotion", "takes.json")
-MOTION_PT_PATH = os.path.join(
-    DATA_ROOT, "ee4d", "ee4d_motion_uniegomotion", "uniegomotion", "ee_train_joints_tips.pt"
-)
-
-CLIPPED_VIDEO_DIR = os.path.join(DATA_ROOT, "train", "takes_clipped", "egoexo", "videos")
-FULL_TAKES_DIR = os.path.join(DATA_ROOT, "train", "takes")
-
-OUTPUT_BASE = os.path.join(DATA_ROOT, "train", "takes_clipped", "egoexo")
-OUTPUT_VIDEO_DIR = os.path.join(OUTPUT_BASE, "videos_atomic")
-OUTPUT_MOTION_DIR = os.path.join(OUTPUT_BASE, "motion_atomic")
 
 FPS = 30
 HALF_WINDOW_SEC = 2.0
@@ -51,9 +38,9 @@ def load_uuid_to_take_name(takes_json_path: str) -> dict:
     return {t["take_uid"]: t["take_name"] for t in takes}
 
 
-def list_ego_clips(take_name: str) -> list[tuple[int, int, str]]:
+def list_ego_clips(take_name: str, clipped_video_dir: str) -> list[tuple[int, int, str]]:
     """Return [(start_frame, end_frame, full_path), ...] for a take's ego clips."""
-    take_dir = os.path.join(CLIPPED_VIDEO_DIR, take_name)
+    take_dir = os.path.join(clipped_video_dir, take_name)
     if not os.path.isdir(take_dir):
         return []
     clips = []
@@ -80,9 +67,9 @@ def find_clip_for_frame(clips: list[tuple[int, int, str]], frame: int):
     return None
 
 
-def find_exo_video(take_name: str, cam_id: str) -> str | None:
+def find_exo_video(take_name: str, cam_id: str, full_takes_dir: str) -> str | None:
     """Find the exo camera video from full takes."""
-    video_dir = os.path.join(FULL_TAKES_DIR, take_name, "frame_aligned_videos")
+    video_dir = os.path.join(full_takes_dir, take_name, "frame_aligned_videos")
     if not os.path.isdir(video_dir):
         return None
     video_path = os.path.join(video_dir, f"{cam_id}.mp4")
@@ -172,25 +159,43 @@ def extract_motion_slice(
 # ── main ───────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--split", choices=["train", "val"], default="train",
+                        help="Dataset split to process (default: train)")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing")
     parser.add_argument("--output-json", type=str, default=None,
                         help="Path for intermediate annotation JSON")
     args = parser.parse_args()
 
     if args.output_json is None:
-        args.output_json = os.path.join(os.path.dirname(__file__), "annotation_atomic_intermediate.json")
+        suffix = "" if args.split == "train" else f"_{args.split}"
+        args.output_json = os.path.join(
+            os.path.dirname(__file__), f"annotation_atomic_intermediate{suffix}.json"
+        )
+
+    # ── paths derived from split ────────────────────────────────────────
+    atomic_desc_path = os.path.join(DATA_ROOT, "description", f"atomic_descriptions_{args.split}.json")
+    takes_json_path = os.path.join(DATA_ROOT, "ee4d", "ee4d_motion_uniegomotion", "takes.json")
+    motion_pt_path = os.path.join(
+        DATA_ROOT, "ee4d", "ee4d_motion_uniegomotion", "uniegomotion", f"ee_{args.split}_joints_tips.pt"
+    )
+    clipped_video_dir = os.path.join(DATA_ROOT, args.split, "takes_clipped", "egoexo", "videos")
+    full_takes_dir = os.path.join(DATA_ROOT, args.split, "takes")
+    output_base = os.path.join(DATA_ROOT, args.split, "takes_clipped", "egoexo")
+    output_video_dir = os.path.join(output_base, "videos_atomic")
+    output_motion_dir = os.path.join(output_base, "motion_atomic")
 
     # ── 1. Load metadata ───────────────────────────────────────────────
+    print(f"Split: {args.split}")
     print("Loading atomic descriptions...")
-    with open(ATOMIC_DESC_PATH, "r") as f:
+    with open(atomic_desc_path, "r") as f:
         atomic_data = json.load(f)
 
     print("Loading takes.json...")
-    uuid_to_take = load_uuid_to_take_name(TAKES_JSON_PATH)
+    uuid_to_take = load_uuid_to_take_name(takes_json_path)
 
     print("Loading motion data (this may take a while)...")
     if not args.dry_run:
-        motion_data = torch.load(MOTION_PT_PATH, map_location="cpu", weights_only=False)
+        motion_data = torch.load(motion_pt_path, map_location="cpu", weights_only=False)
     else:
         motion_data = {}
 
@@ -233,7 +238,7 @@ def main():
                 stats["no_take_mapping"] += len(anno.get("descriptions", []))
             continue
 
-        ego_clips = list_ego_clips(take_name)
+        ego_clips = list_ego_clips(take_name, clipped_video_dir)
 
         for anno in anno_list:
             if anno.get("rejected", False):
@@ -276,7 +281,7 @@ def main():
                     max_duration = (clip_end - clip_start) / FPS - rel_start_sec
                     duration_sec = min(duration_sec, max_duration)
 
-                    ego_out = os.path.join(OUTPUT_VIDEO_DIR, take_name, f"{sample_id}_ego.mp4")
+                    ego_out = os.path.join(output_video_dir, take_name, f"{sample_id}_ego.mp4")
                     ego_rel = os.path.join("videos_atomic", take_name, f"{sample_id}_ego.mp4")
                     ok = clip_video_ffmpeg(clip_path, ego_out, rel_start_sec, duration_sec, args.dry_run)
                     if ok:
@@ -286,13 +291,13 @@ def main():
                     stats["no_ego_clip"] += 1
 
                 # ── Exo video clip ──
-                exo_src = find_exo_video(take_name, exo_cam_id)
+                exo_src = find_exo_video(take_name, exo_cam_id, full_takes_dir)
                 if exo_src is not None:
                     # Exo is full-length video, use absolute timestamp
                     exo_start_sec = max(0, frame_start / FPS)
                     exo_duration = (frame_end - frame_start) / FPS
 
-                    exo_out = os.path.join(OUTPUT_VIDEO_DIR, take_name, f"{sample_id}_exo.mp4")
+                    exo_out = os.path.join(output_video_dir, take_name, f"{sample_id}_exo.mp4")
                     exo_rel = os.path.join("videos_atomic", take_name, f"{sample_id}_exo.mp4")
                     ok = clip_video_ffmpeg(exo_src, exo_out, exo_start_sec, exo_duration, args.dry_run)
                     if ok:
@@ -312,7 +317,7 @@ def main():
                     )
                     if kp3d_slice is not None and kp3d_slice.shape[0] > 0:
                         motion_out = os.path.join(
-                            OUTPUT_MOTION_DIR, take_name, f"{sample_id}_kp3d.npy"
+                            output_motion_dir, take_name, f"{sample_id}_kp3d.npy"
                         )
                         motion_rel = os.path.join(
                             "motion_atomic", take_name, f"{sample_id}_kp3d.npy"

@@ -27,7 +27,7 @@ from dataset.ret_dataset import (ImgTxtRetTrainDataset,
 from dataset.qa_dataset import ImageQADataset, VideoQADataset
 from dataset.pt_dataset import (ImgTxtPtTrainDataset,
                                 VidTxtPtTrainDataset,)
-from dataset.motion_dataset import VidMotionTxtPtTrainDataset
+from dataset.motion_dataset import VidMotionTxtPtTrainDataset, VidMotionTxtRetEvalDataset
 # from dataset.pt_dataset import (ImgTxtPtTrainDataset,
 #                                 VidTxtPtTrainDataset,
 #                                 AudioVidTxtPtTrainDataset,
@@ -68,6 +68,8 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = ImgTxtRetEvalDataset
         elif media_type == "video":
             dataset_cls = VidTxtRetEvalDataset
+        elif media_type == "video_motion":
+            dataset_cls = VidMotionTxtRetEvalDataset
         # elif media_type == "audio":
         #     dataset_cls = AudioTxtRetEvalDataset
         # elif media_type == "audio_video":
@@ -357,6 +359,12 @@ def create_dataset(dataset_type, config):
                         transform=test_transform)
                     dataset_kwargs.update(video_only_dataset_kwargs_eval)
                     dataset_kwargs.update(audio_only_dataset_kwargs_eval)
+                elif media_type == 'video_motion':
+                    dataset_kwargs = dict(
+                        ann_file=data_cfg,
+                        transform=test_transform,
+                    )
+                    dataset_kwargs.update(video_only_dataset_kwargs_eval)
                 elif media_type != 'image':
                     raise NotImplementedError(f"media_type={media_type}")
                 
