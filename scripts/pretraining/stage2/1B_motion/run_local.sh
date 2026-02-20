@@ -27,7 +27,7 @@ NUM_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
 echo "Detected GPUs: ${NUM_GPUS}"
 
 JOB_NAME="stage2_motion_$(date +%Y%m%d_%H%M%S)"
-OUTPUT_DIR="${SCRIPT_DIR}/${JOB_NAME}"
+OUTPUT_DIR="${SCRIPT_DIR}/outputs/${JOB_NAME}"
 
 echo "Working dir: ${WORK_DIR}"
 echo "Output dir:  ${OUTPUT_DIR}"
