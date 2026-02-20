@@ -191,7 +191,7 @@ class MotionEncoder(nn.Module):
         vqvae_config_path = config.get("vqvae_config", None)
 
         logger.info(f"Loading H2VQ checkpoint from {ckpt_path}")
-        ckpt = torch.load(ckpt_path, map_location="cpu")
+        ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
 
         # Add BodyTokenize to sys.path so we can import it
         # ckpt_path is like /path/to/BodyTokenize/ckpt_vq/ckpt_best.pt

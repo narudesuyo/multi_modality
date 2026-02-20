@@ -62,7 +62,7 @@ def setup_model(
 
     if "bert" in config.model.text_encoder.name:
         logger.info(f"Using BertTokenizer: {config.model.text_encoder.pretrained}!")
-        tokenizer = BertTokenizer.from_pretrained(config.model.text_encoder.pretrained, local_files_only=True)
+        tokenizer = BertTokenizer.from_pretrained(config.model.text_encoder.pretrained, local_files_only=False)
         model = model_cls(config=config, tokenizer=tokenizer, is_pretrain=pretrain)
     else:
         model = model_cls(config=config, is_pretrain=pretrain)
@@ -127,9 +127,9 @@ def setup_model(
         if Client is not None:
             client = Client()
             with io.BytesIO(client.get(config.pretrained_path)) as buffer:
-                checkpoint = torch.load(buffer, map_location="cpu")
+                checkpoint = torch.load(buffer, map_location="cpu", weights_only=False)
         else:
-            checkpoint = torch.load(config.pretrained_path, map_location="cpu")
+            checkpoint = torch.load(config.pretrained_path, map_location="cpu", weights_only=False)
         logger.info(f"Loading checkpoint from {config.pretrained_path}")
         try:
             if "model" in checkpoint.keys():

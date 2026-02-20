@@ -31,14 +31,14 @@ def build_bert(model_config, pretrain, checkpoint, encoder_width=None):
             text_encoder, loading_info = BertForMaskedLM.from_pretrained(
                 model_config.text_encoder.pretrained,
                 config=bert_config,
-                output_loading_info=True, 
-                local_files_only=True
+                output_loading_info=True,
+                local_files_only=False
             )
         except:
             text_encoder, loading_info = BertForMaskedLM.from_pretrained(
                 model_config.text_encoder.pretrained,
                 config=bert_config,
-                output_loading_info=True, 
+                output_loading_info=True,
                 local_files_only=False
             )
     else:
@@ -48,7 +48,7 @@ def build_bert(model_config, pretrain, checkpoint, encoder_width=None):
                 config=bert_config,
                 add_pooling_layer=False,
                 output_loading_info=True,
-                local_files_only=True
+                local_files_only=False
             )
         except:
             text_encoder, loading_info = BertModel.from_pretrained(
@@ -88,7 +88,7 @@ def build_bert_decoder(model_config, checkpoint, only_fusion_layer=True):
         model_config.text_encoder.pretrained,
         config=bert_config,
         output_loading_info=True,
-        local_files_only=True
+        local_files_only=False
     )
 
     return text_decoder
@@ -113,7 +113,7 @@ def build_lm_bert_decoder(model_config, checkpoint):
         model_config.text_encoder.pretrained,
         config=bert_config,
         output_loading_info=True,
-        local_files_only=True
+        local_files_only=False
     )
 
     return text_decoder

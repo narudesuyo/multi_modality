@@ -39,4 +39,5 @@ torchrun \
     "$@" \
     tasks/pretrain.py \
     "${SCRIPT_DIR}/config.py" \
-    output_dir "${OUTPUT_DIR}"
+    output_dir "${OUTPUT_DIR}" \
+    num_workers 0
