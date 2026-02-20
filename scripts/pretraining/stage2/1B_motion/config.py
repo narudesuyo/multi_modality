@@ -37,8 +37,8 @@ best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 # ========================= input ==========================
 num_frames = 4
 num_frames_test = 4
-batch_size = 2
-batch_size_test = 4
+batch_size = 1
+batch_size_test = 1
 max_txt_l = 32
 motion_T = 21  # motion sequence length (matching BodyTokenize)
 
