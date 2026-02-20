@@ -61,4 +61,4 @@ exp
 batchscript-*
 *.out
 
-./scripts/pretraining/stage2/1B_motion/outputs
+scripts/pretraining/stage2/1B_motion/outputs/

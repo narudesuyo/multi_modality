@@ -129,11 +129,11 @@ class VidMotionTxtPtTrainDataset(BaseDataset):
             caption = pre_text(ann["caption"])
 
             # Load video
-            logger.info(f"[DEBUG] Loading video: {ann['video']}")
+            logger.debug(f"Loading video: {ann['video']}")
             video, index = self.load_and_transform_media_data(index, ann["video"])
 
             # Load tokenized pose indices
-            logger.info(f"[DEBUG] Loading tok_pose: {ann['tok_pose']}")
+            logger.debug(f"Loading tok_pose: {ann['tok_pose']}")
             motion_indices = self.load_tok_pose(ann["tok_pose"])
 
             media = [video, motion_indices]
