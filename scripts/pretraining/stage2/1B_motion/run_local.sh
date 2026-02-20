@@ -22,6 +22,14 @@ export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}./"
 # wandb: default online. Set WANDB_MODE=offline for local-only logging.
 export WANDB_MODE="${WANDB_MODE:-online}"
 
+# Suppress noisy debug/warning logs
+export PYTHONWARNINGS="ignore"
+export TRANSFORMERS_VERBOSITY="error"
+export DATASETS_VERBOSITY="error"
+export NCCL_DEBUG="WARN"
+export DS_LOG_LEVEL="WARNING"
+export TORCH_DISTRIBUTED_DEBUG="OFF"
+
 # Auto-detect GPU count
 NUM_GPUS=$(python -c "import torch; print(torch.cuda.device_count())")
 echo "Detected GPUs: ${NUM_GPUS}"

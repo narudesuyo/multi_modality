@@ -37,8 +37,8 @@ best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 # ========================= input ==========================
 num_frames = 4
 num_frames_test = 4
-batch_size = 1
-batch_size_test = 1
+batch_size = 2
+batch_size_test = 2
 max_txt_l = 32
 motion_T = 21  # motion sequence length (matching BodyTokenize)
 
@@ -78,9 +78,9 @@ model = dict(
         pretrained=_os.path.join(_WORK_DIR, "scripts/pretraining/stage1/1B_ft_k710_f8.pth"),
         use_checkpoint=True,
         checkpoint_num=40,
-        use_flash_attn=False,
-        use_fused_rmsnorm=False,
-        use_fused_mlp=False,
+        use_flash_attn=True,
+        use_fused_rmsnorm=True,
+        use_fused_mlp=True,
         # clip teacher (disabled for motion experiment)
         clip_teacher=None,
         clip_input_resolution=224,
@@ -158,7 +158,7 @@ use_half_precision = True
 use_bf16 = True
 
 gradient_checkpointing = True
-use_flash_sdp = False
+use_flash_sdp = True
 use_mem_efficient_sdp = False and not use_flash_sdp
 compile_model = False
 
