@@ -5136,3 +5136,20 @@ dataloader index=0 name=video_motion, batch-size=2 length(#batches)=126
 
 2026-02-21T02:06:22 | INFO | utils.basic_utils : extracting video+motion feats  [  0/163]  eta: 0:26:02    time: 9.5874  data: 7.2733  max mem: 29556 res mem: 31400
 2026-02-21T02:07:51 | INFO | utils.basic_utils : extracting video+motion feats  [100/163]  eta: 0:01:01    time: 1.0612  data: 0.9762  max mem: 29556 res mem: 31400
+2026-02-21T02:09:13 | INFO | utils.basic_utils : extracting video+motion feats  [162/163]  eta: 0:00:01    time: 1.0743  data: 0.9886  max mem: 29556 res mem: 31400
+2026-02-21T02:09:13 | INFO | utils.basic_utils : extracting video+motion feats Total time: 0:03:00 (1.1047 s / it)
+2026-02-21T02:09:13 | INFO | tasks.retrieval_utils : Finished video+motion feature extraction
+2026-02-21T02:09:13 | INFO | tasks.retrieval_utils : Computing ITC scores [dot-product]
+2026-02-21T02:09:13 | INFO | tasks.retrieval_utils : Computing ITC scores [dot-product], done!
+2026-02-21T02:09:13 | INFO | tasks.retrieval_utils : Rerank dual-encoder results with cross-encoder...
+2026-02-21T02:09:13 | INFO | tasks.retrieval_utils : i2t_scores.shape torch.Size([326, 326])
+2026-02-21T02:09:13 | INFO | tasks.retrieval_utils : n_clip_per_video=1, with eval_frame_ensemble=concat
+2026-02-21T02:09:14 | INFO | utils.basic_utils : Evaluation:  [  0/326]  eta: 0:02:03    time: 0.3794  data: 0.0004  max mem: 29556 res mem: 31400
+2026-02-21T02:09:21 | INFO | utils.basic_utils : Evaluation:  [100/326]  eta: 0:00:17    time: 0.0733  data: 0.0000  max mem: 29556 res mem: 31400
+2026-02-21T02:09:28 | INFO | utils.basic_utils : Evaluation:  [200/326]  eta: 0:00:09    time: 0.0731  data: 0.0000  max mem: 29556 res mem: 31400
+2026-02-21T02:09:36 | INFO | utils.basic_utils : Evaluation:  [300/326]  eta: 0:00:01    time: 0.0730  data: 0.0000  max mem: 29556 res mem: 31400
+2026-02-21T02:09:37 | INFO | utils.basic_utils : Evaluation:  [325/326]  eta: 0:00:00    time: 0.0730  data: 0.0000  max mem: 29556 res mem: 31400
+2026-02-21T02:09:37 | INFO | utils.basic_utils : Evaluation: Total time: 0:00:24 (0.0740 s / it)
+2026-02-21T02:09:37 | INFO | tasks.retrieval_utils : t2i_scores.shape torch.Size([326, 326])
+2026-02-21T02:09:38 | INFO | utils.basic_utils : Evaluation:  [  0/326]  eta: 0:01:30    time: 0.2783  data: 0.0003  max mem: 29556 res mem: 31400
+2026-02-21T02:09:52 | INFO | utils.basic_utils : Evaluation:  [100/326]  eta: 0:00:33    time: 0.1447  data: 0.0000  max mem: 29556 res mem: 31400
