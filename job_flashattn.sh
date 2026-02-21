@@ -15,8 +15,6 @@ echo "=== PWD:  $(pwd) ==="
 
 # 0) (必須) module 初期化されてない環境向け
 # 環境によって不要/パスが違う場合あり。通らなければ消してOK。
-if [ -f /etc/profile ]; then . /etc/profile; fi
-
 # 1) conda activate
 # あなたの環境の conda.sh に合わせて固定
 . /work/04/gf15/f15016/apps/miniconda3/etc/profile.d/conda.sh
