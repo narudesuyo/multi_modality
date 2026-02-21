@@ -10,6 +10,9 @@
 
 set -euo pipefail
 
+export PIP_CACHE_DIR="/work/04/gf15/f15016/.cache/pip"
+mkdir -p "${PIP_CACHE_DIR}"
+
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 
