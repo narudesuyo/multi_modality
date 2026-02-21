@@ -8,6 +8,8 @@ ENV_PREFIX="${SCRIPT_DIR}/.conda"
 
 echo "=== Creating conda environment at ${ENV_PREFIX} ==="
 conda env create -f "${SCRIPT_DIR}/environment.yml" --prefix "${ENV_PREFIX}" --yes
+# Activate env in script (conda activate doesn't work in bash scripts)
+eval "$(conda shell.bash hook)"
 conda activate "${ENV_PREFIX}"
 
 # ========== 2. Flash Attention ==========
