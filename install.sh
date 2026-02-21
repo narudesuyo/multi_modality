@@ -1,13 +1,19 @@
 #!/bin/bash
 set -euo pipefail
 
-# Flash Attention 2 and its CUDA extensions installer
-# Ref: https://github.com/Dao-AILab/flash-attention
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# ========== 1. Conda environment ==========
+ENV_PREFIX="${SCRIPT_DIR}/.conda"
+
+echo "=== Creating conda environment at ${ENV_PREFIX} ==="
+conda env create -f "${SCRIPT_DIR}/environment.yml" --prefix "${ENV_PREFIX}" --yes
+conda activate "${ENV_PREFIX}"
+
+# ========== 2. Flash Attention ==========
 FLASH_ATTN_VERSION="v2.6.3"
 FLASH_ATTN_DIR="/tmp/flash-attention"
 
-# Use MAX_JOBS to control parallel compilation (default: nproc)
 export MAX_JOBS=24
 
 echo "=== Cloning flash-attention ${FLASH_ATTN_VERSION} to ${FLASH_ATTN_DIR} ==="
