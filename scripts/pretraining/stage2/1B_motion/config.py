@@ -26,17 +26,30 @@ available_corpus["video_motion_val"] = dict(
     normalize_motion=False,
 )
 
-train_file = [available_corpus["video_motion_train"]]
+# LMDB versions (faster I/O — build with: python tools/build_lmdb.py)
+available_corpus["video_motion_lmdb_train"] = dict(
+    lmdb_path=_os.path.join(_DATA_ROOT, "lmdb/train.lmdb"),
+    media_type="video_motion_lmdb",
+)
+available_corpus["video_motion_lmdb_val"] = dict(
+    lmdb_path=_os.path.join(_DATA_ROOT, "lmdb/val.lmdb"),
+    media_type="video_motion_lmdb",
+)
 
-test_file = dict(video_motion_val=available_corpus["video_motion_val"])
+# Switch between raw files and LMDB:
+#   raw:  video_motion_train / video_motion_val
+#   lmdb: video_motion_lmdb_train / video_motion_lmdb_val
+train_file = [available_corpus["video_motion_lmdb_train"]]
+
+test_file = dict(video_motion_val=available_corpus["video_motion_lmdb_val"])
 test_types = ["video_motion_val"]
 num_workers = 6
 
 best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 
 # ========================= input ==========================
-num_frames = 4
-num_frames_test = 4
+num_frames = 8
+num_frames_test = 8
 batch_size = 2
 batch_size_test = 2
 max_txt_l = 32
@@ -51,9 +64,9 @@ inputs = dict(
         sample_type_test="middle",
         random_aug=False,
     ),
-    max_txt_l=dict(image="${max_txt_l}", video="${max_txt_l}", video_motion="${max_txt_l}"),
-    batch_size=dict(image="${batch_size}", video="${batch_size}", video_motion="${batch_size}"),
-    batch_size_test=dict(image="${batch_size_test}", video="${batch_size_test}", video_motion="${batch_size_test}"),
+    max_txt_l=dict(image="${max_txt_l}", video="${max_txt_l}", video_motion="${max_txt_l}", video_motion_lmdb="${max_txt_l}"),
+    batch_size=dict(image="${batch_size}", video="${batch_size}", video_motion="${batch_size}", video_motion_lmdb="${batch_size}"),
+    batch_size_test=dict(image="${batch_size_test}", video="${batch_size_test}", video_motion="${batch_size_test}", video_motion_lmdb="${batch_size_test}"),
     motion_T="${motion_T}",
 )
 

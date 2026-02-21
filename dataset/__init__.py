@@ -28,6 +28,7 @@ from dataset.qa_dataset import ImageQADataset, VideoQADataset
 from dataset.pt_dataset import (ImgTxtPtTrainDataset,
                                 VidTxtPtTrainDataset,)
 from dataset.motion_dataset import VidMotionTxtPtTrainDataset, VidMotionTxtRetEvalDataset
+from dataset.motion_dataset_lmdb import VidMotionTxtLmdbPtTrainDataset, VidMotionTxtLmdbRetEvalDataset
 # from dataset.pt_dataset import (ImgTxtPtTrainDataset,
 #                                 VidTxtPtTrainDataset,
 #                                 AudioVidTxtPtTrainDataset,
@@ -46,6 +47,8 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = VidTxtPtTrainDataset
         elif media_type == "video_motion":
             dataset_cls = VidMotionTxtPtTrainDataset
+        elif media_type == "video_motion_lmdb":
+            dataset_cls = VidMotionTxtLmdbPtTrainDataset
         # elif media_type == "audio_video":
         #     dataset_cls = AudioVidTxtPtTrainDataset
         # elif media_type == "audio":
@@ -70,6 +73,8 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = VidTxtRetEvalDataset
         elif media_type == "video_motion":
             dataset_cls = VidMotionTxtRetEvalDataset
+        elif media_type == "video_motion_lmdb":
+            dataset_cls = VidMotionTxtLmdbRetEvalDataset
         # elif media_type == "audio":
         #     dataset_cls = AudioTxtRetEvalDataset
         # elif media_type == "audio_video":
@@ -230,6 +235,9 @@ def create_dataset(dataset_type, config):
                 elif m == "video_motion":
                     dataset_kwargs.update(video_only_dataset_kwargs_train)
                     dataset_kwargs["motion_T"] = config.inputs.get("motion_T", 21)
+                elif m == "video_motion_lmdb":
+                    dataset_kwargs["num_frames"] = config.inputs.video_input.num_frames
+                    dataset_kwargs["motion_T"] = config.inputs.get("motion_T", 21)
                 elif m == 'audio':
                     dataset_kwargs.update(audio_only_dataset_kwargs_train)
                 elif m != 'image':
@@ -365,6 +373,12 @@ def create_dataset(dataset_type, config):
                         transform=test_transform,
                     )
                     dataset_kwargs.update(video_only_dataset_kwargs_eval)
+                elif media_type == 'video_motion_lmdb':
+                    dataset_kwargs = dict(
+                        ann_file=data_cfg,
+                        transform=test_transform,
+                        num_frames=config.inputs.video_input.num_frames_test,
+                    )
                 elif media_type != 'image':
                     raise NotImplementedError(f"media_type={media_type}")
                 
