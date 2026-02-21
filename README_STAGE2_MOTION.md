@@ -98,23 +98,25 @@ export DATA_ROOT=/path/to/your/data
 ```bash
 cd scripts/pretraining/stage2/1B_motion
 
-# train split
+# 初回: 動画 + motion kp3d 全部生成
 python prepare_atomic_clips.py --split train --validate --skip-existing
-
-# val split
 python prepare_atomic_clips.py --split val --validate --skip-existing
+
+# kp3d のみ再生成 (動画はスキップ)
+python prepare_atomic_clips.py --split train --motion-only
+python prepare_atomic_clips.py --split val --motion-only
 ```
 
 **処理内容:**
 - Ego 動画: 既存クリップから該当区間を ffmpeg で切り出し
 - Exo 動画: フルテイク動画から best_exo カメラの該当区間を切り出し
-- Motion: `ee_{split}_joints_tips.pt` から該当フレームの kp3d (3D 関節点) を抽出
+- Motion: `ee_{split}_joints_tips.pt` から該当フレームの kp3d (3D 関節点) を抽出し、**常に 41 フレームにリサンプル** (線形補間)
 
 **出力:**
 ```
 ${DATA_ROOT}/{split}/takes_clipped/egoexo/
 ├── videos_atomic/{take_name}/{sample_id}_{ego|exo}.mp4
-├── motion_atomic/{take_name}/{sample_id}_kp3d.npy    # [T, 154, 3]
+├── motion_atomic/{take_name}/{sample_id}_kp3d.npy    # [41, 154, 3] (固定長)
 └── ffmpeg_logs_atomic/                                # デバッグ用ログ
 ```
 
@@ -132,6 +134,7 @@ scripts/pretraining/stage2/1B_motion/
 | `--skip-existing` | 既存ファイルをスキップ (再実行時に便利) |
 | `--require-both-videos` | ego と exo 両方ある場合のみ残す |
 | `--require-motion` | motion kp3d がある場合のみ残す |
+| `--motion-only` | kp3d のみ再生成 (動画クリッピングをスキップ) |
 
 ---
 
@@ -148,18 +151,20 @@ python inference_atomic.py \
 ```
 
 **処理内容:**
-1. `motion_atomic/{take_name}/{sample_id}_kp3d.npy` を読み込み
-2. kp3d → motion representation (RIC, rotation, velocity, feet contact)
-3. スライディングウィンドウ (clip_len=41, overlap=1) で分割
-4. VQ-VAE でトークンインデックスに量子化
+1. `motion_atomic/{take_name}/{sample_id}_kp3d.npy` (41 フレーム固定) を読み込み
+2. kp3d → motion representation (RIC, rotation, velocity, feet contact) → 40 フレーム
+3. VQ-VAE (body_down=1) でトークンインデックスに量子化 → 40 timesteps x 8 tokens
+
+kp3d が 41 フレーム固定なので、clip_len=41 (デフォルト) で**チャンク分割なし** (1 サンプル = 1 ファイル)。
 
 **出力:**
 ```
 ${DATA_ROOT}/{split}/takes_clipped/egoexo/
-└── tok_pose_atomic_40/{take_name}/{sample_id}_{chunk:04d}.npz
+└── tok_pose_atomic_40/{take_name}/{sample_id}_0000.npz
+    # idx: shape (1, 40, 8), dtype int64
 ```
 
-NPZ の中身: `idx` キーに motion token indices (codebook サイズ K=1024)
+NPZ の中身: `idx` キーに motion token indices (codebook サイズ K=1024, 4 body + 4 hand tokens/timestep)
 
 **VQ-VAE チェックポイント:**
 - モデル: `EgoHand/BodyTokenize/ckpt_vq/ckpt_best.pt`
@@ -234,11 +239,13 @@ python tools/build_lmdb.py \
     --map-size-gb 10
 ```
 
+動画フレームの読み込みは sequential decode で行うため、`cv2.CAP_PROP_FRAME_COUNT` の不正確さに影響されない。
+
 **LMDB の中身 (1サンプルあたり、msgpack):**
 ```python
 {
     "frames": [jpeg_bytes, ...],   # JPEG エンコード済みフレーム x 8
-    "motion_idx": [int, ...],      # motion token indices
+    "motion_idx": [int, ...],      # motion token indices (40*8 = 320 要素)
     "caption": "text"
 }
 ```
@@ -309,7 +316,7 @@ WANDB_MODE=offline bash run_stage2.sh
 | パラメータ | 値 | 説明 |
 |-----------|-----|------|
 | num_frames | 8 | 動画フレーム数 |
-| motion_T | 21 | Motion 系列長 |
+| motion_T | 40 | Motion 系列長 (40 timesteps x 8 tokens) |
 | batch_size | 2 | バッチサイズ/GPU |
 | lr | 5e-5 | 学習率 |
 | epochs | 10 | エポック数 |
@@ -332,7 +339,8 @@ multi_modality/
 ├── environment.yml                # conda 環境定義
 ├── requirements.txt               # pip 依存
 ├── tools/
-│   └── build_lmdb.py             # LMDB 構築スクリプト
+│   ├── build_lmdb.py             # LMDB 構築スクリプト
+│   └── visualize_dataset.py      # データセット可視化 (video.mp4 + motion.mp4)
 ├── tasks/
 │   └── pretrain.py               # 学習エントリポイント
 ├── dataset/

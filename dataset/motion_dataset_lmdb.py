@@ -116,6 +116,7 @@ class VidMotionTxtLmdbRetEvalDataset(Dataset):
 
         # Build text/retrieval mappings by reading all captions
         self.text = []
+        self.image = []  # dummy list for len(); retrieval_utils uses len(dataset.image)
         self.txt2img = {}
         self.img2txt = {}
         with self.env.begin(write=False) as txn:
@@ -123,6 +124,7 @@ class VidMotionTxtLmdbRetEvalDataset(Dataset):
                 raw = txn.get(f"{i:08d}".encode())
                 sample = msgpack.unpackb(raw, raw=False)
                 self.text.append(pre_text(sample["caption"]))
+                self.image.append(i)
                 self.txt2img[i] = i
                 self.img2txt[i] = [i]
 

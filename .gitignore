@@ -62,3 +62,4 @@ batchscript-*
 *.out
 
 scripts/pretraining/stage2/1B_motion/outputs/
+/vis_output/

@@ -216,6 +216,9 @@ def find_motion_key_for_frame(
     return None
 
 
+TARGET_MOTION_FRAMES = 41  # Fixed output length for kp3d slices
+
+
 def extract_motion_slice(
     motion_data: dict,
     key: str,
@@ -223,7 +226,8 @@ def extract_motion_slice(
     abs_frame_end: int,
 ) -> Optional[np.ndarray]:
     """Extract a slice of kp3d from motion data for the given absolute frame range.
-    Returns: kp3d array [T_slice, 154, 3] or None if key not found.
+    Always resamples to TARGET_MOTION_FRAMES frames via linear interpolation.
+    Returns: kp3d array [TARGET_MOTION_FRAMES, 154, 3] or None if key not found.
     """
     item = motion_data.get(key)
     if item is None:
@@ -242,20 +246,27 @@ def extract_motion_slice(
         return None
 
     # Proportional mapping from absolute frames to kp3d indices
-    def to_idx(abs_f: int) -> int:
+    def to_idx(abs_f: int) -> float:
         x = (abs_f - clip_start) / float(total_clip_frames)
-        return int(round(x * num_frames))
+        return x * num_frames
 
-    idx_start = to_idx(abs_frame_start)
-    idx_end = to_idx(abs_frame_end)
+    src_start = to_idx(abs_frame_start)
+    src_end = to_idx(abs_frame_end)
 
     # clamp
-    idx_start = max(0, min(idx_start, num_frames - 1))
-    idx_end = max(idx_start + 1, min(idx_end, num_frames))
+    src_start = max(0.0, min(src_start, num_frames - 1.0))
+    src_end = max(src_start + 0.01, min(src_end, float(num_frames)))
 
-    out = kp3d[idx_start:idx_end].copy()
-    if out.shape[0] <= 0:
-        return None
+    # Resample to exactly TARGET_MOTION_FRAMES via linear interpolation
+    sample_pts = np.linspace(src_start, src_end - 1e-6, TARGET_MOTION_FRAMES)
+    T, J, C = kp3d.shape
+    out = np.empty((TARGET_MOTION_FRAMES, J, C), dtype=np.float32)
+    for i, pt in enumerate(sample_pts):
+        lo = int(pt)
+        hi = min(lo + 1, T - 1)
+        alpha = pt - lo
+        out[i] = (1.0 - alpha) * kp3d[lo] + alpha * kp3d[hi]
+
     return out
 
 
@@ -281,6 +292,8 @@ def main():
                         help="Only keep samples that have BOTH ego and exo videos")
     parser.add_argument("--require-motion", action="store_true",
                         help="Only keep samples that have motion_kp3d")
+    parser.add_argument("--motion-only", action="store_true",
+                        help="Re-generate motion kp3d only (skip video clipping)")
     args = parser.parse_args()
 
     here = Path(__file__).parent
@@ -411,72 +424,85 @@ def main():
 
                 # ── Ego clip ────────────────────────────────────────────────
                 ego_ok = False
-                ego_result = find_clip_for_frame(ego_clips, center_frame)
-                if ego_result is not None:
-                    clip_start, clip_end, clip_path = ego_result
+                if args.motion_only:
+                    # In motion-only mode, check if ego video already exists
+                    if os.path.exists(ego_out) and os.path.getsize(ego_out) > 1024:
+                        ego_ok = True
+                        entry["video_ego"] = ego_rel
+                        stats["ego_ok"] += 1
+                else:
+                    ego_result = find_clip_for_frame(ego_clips, center_frame)
+                    if ego_result is not None:
+                        clip_start, clip_end, clip_path = ego_result
 
-                    rel_start_sec = max(0.0, (frame_start - clip_start) / FPS)
-                    duration_sec = (frame_end - frame_start) / FPS
+                        rel_start_sec = max(0.0, (frame_start - clip_start) / FPS)
+                        duration_sec = (frame_end - frame_start) / FPS
 
-                    # Clamp duration not to exceed the source ego clip
-                    max_duration = (clip_end - clip_start) / FPS - rel_start_sec
-                    duration_sec = max(0.0, min(duration_sec, max_duration))
+                        # Clamp duration not to exceed the source ego clip
+                        max_duration = (clip_end - clip_start) / FPS - rel_start_sec
+                        duration_sec = max(0.0, min(duration_sec, max_duration))
 
-                    if duration_sec >= 0.2:  # avoid extremely short clips
-                        if args.skip_existing and os.path.exists(ego_out) and os.path.getsize(ego_out) > 1024:
-                            ego_ok = True
-                            stats["skipped_existing"] += 1
-                        else:
-                            ego_ok = clip_video_ffmpeg_safe(
-                                clip_path, ego_out, rel_start_sec, duration_sec,
-                                dry_run=args.dry_run,
-                                validate=args.validate,
-                                validate_timeout=args.validate_timeout,
-                                log_dir=ffmpeg_log_dir,
-                            )
-                        if ego_ok:
-                            entry["video_ego"] = ego_rel
-                            stats["ego_ok"] += 1
+                        if duration_sec >= 0.2:  # avoid extremely short clips
+                            if args.skip_existing and os.path.exists(ego_out) and os.path.getsize(ego_out) > 1024:
+                                ego_ok = True
+                                stats["skipped_existing"] += 1
+                            else:
+                                ego_ok = clip_video_ffmpeg_safe(
+                                    clip_path, ego_out, rel_start_sec, duration_sec,
+                                    dry_run=args.dry_run,
+                                    validate=args.validate,
+                                    validate_timeout=args.validate_timeout,
+                                    log_dir=ffmpeg_log_dir,
+                                )
+                            if ego_ok:
+                                entry["video_ego"] = ego_rel
+                                stats["ego_ok"] += 1
+                            else:
+                                stats["bad_output_clip"] += 1
+                                bad_samples.append(f"{take_name}/{sample_id} ego ffmpeg/decord failed")
                         else:
                             stats["bad_output_clip"] += 1
-                            bad_samples.append(f"{take_name}/{sample_id} ego ffmpeg/decord failed")
+                            bad_samples.append(f"{take_name}/{sample_id} ego too_short duration={duration_sec:.3f}")
                     else:
-                        stats["bad_output_clip"] += 1
-                        bad_samples.append(f"{take_name}/{sample_id} ego too_short duration={duration_sec:.3f}")
-                else:
-                    stats["no_ego_clip"] += 1
-                    bad_samples.append(f"{take_name}/{sample_id} no_ego_clip")
+                        stats["no_ego_clip"] += 1
+                        bad_samples.append(f"{take_name}/{sample_id} no_ego_clip")
 
                 # ── Exo clip ────────────────────────────────────────────────
                 exo_ok = False
-                exo_src = find_exo_video(take_name, exo_cam_id, full_takes_dir)
-                if exo_src is not None:
-                    exo_start_sec = max(0.0, frame_start / FPS)
-                    exo_duration = (frame_end - frame_start) / FPS
-                    if exo_duration >= 0.2:
-                        if args.skip_existing and os.path.exists(exo_out) and os.path.getsize(exo_out) > 1024:
-                            exo_ok = True
-                            stats["skipped_existing"] += 1
-                        else:
-                            exo_ok = clip_video_ffmpeg_safe(
-                                exo_src, exo_out, exo_start_sec, exo_duration,
-                                dry_run=args.dry_run,
-                                validate=args.validate,
-                                validate_timeout=args.validate_timeout,
-                                log_dir=ffmpeg_log_dir,
-                            )
-                        if exo_ok:
-                            entry["video_exo"] = exo_rel
-                            stats["exo_ok"] += 1
+                if args.motion_only:
+                    if os.path.exists(exo_out) and os.path.getsize(exo_out) > 1024:
+                        exo_ok = True
+                        entry["video_exo"] = exo_rel
+                        stats["exo_ok"] += 1
+                else:
+                    exo_src = find_exo_video(take_name, exo_cam_id, full_takes_dir)
+                    if exo_src is not None:
+                        exo_start_sec = max(0.0, frame_start / FPS)
+                        exo_duration = (frame_end - frame_start) / FPS
+                        if exo_duration >= 0.2:
+                            if args.skip_existing and os.path.exists(exo_out) and os.path.getsize(exo_out) > 1024:
+                                exo_ok = True
+                                stats["skipped_existing"] += 1
+                            else:
+                                exo_ok = clip_video_ffmpeg_safe(
+                                    exo_src, exo_out, exo_start_sec, exo_duration,
+                                    dry_run=args.dry_run,
+                                    validate=args.validate,
+                                    validate_timeout=args.validate_timeout,
+                                    log_dir=ffmpeg_log_dir,
+                                )
+                            if exo_ok:
+                                entry["video_exo"] = exo_rel
+                                stats["exo_ok"] += 1
+                            else:
+                                stats["bad_output_clip"] += 1
+                                bad_samples.append(f"{take_name}/{sample_id} exo ffmpeg/decord failed cam={exo_cam_id}")
                         else:
                             stats["bad_output_clip"] += 1
-                            bad_samples.append(f"{take_name}/{sample_id} exo ffmpeg/decord failed cam={exo_cam_id}")
+                            bad_samples.append(f"{take_name}/{sample_id} exo too_short duration={exo_duration:.3f}")
                     else:
-                        stats["bad_output_clip"] += 1
-                        bad_samples.append(f"{take_name}/{sample_id} exo too_short duration={exo_duration:.3f}")
-                else:
-                    stats["no_exo_video"] += 1
-                    bad_samples.append(f"{take_name}/{sample_id} no_exo_video cam={exo_cam_id}")
+                        stats["no_exo_video"] += 1
+                        bad_samples.append(f"{take_name}/{sample_id} no_exo_video cam={exo_cam_id}")
 
                 # ── Motion slice ────────────────────────────────────────────
                 motion_ok = False

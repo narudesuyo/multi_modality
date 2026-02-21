@@ -44,21 +44,30 @@ def encode_jpeg(frame_bgr, quality=95):
     return buf.tobytes()
 
 
-def read_video_cv2(video_path, frame_indices):
-    """Read specific frames from video using cv2.VideoCapture."""
+def read_and_sample_video(video_path, num_frames):
+    """Read video sequentially and return uniformly sampled frames (single pass, robust).
+
+    Uses sequential decode to avoid cv2 CAP_PROP_FRAME_COUNT inaccuracy.
+    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
 
-    frames = []
-    for idx in sorted(frame_indices):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+    # Read all frames sequentially (robust against inaccurate frame count)
+    all_frames = []
+    while True:
         ret, frame_bgr = cap.read()
         if not ret:
-            raise RuntimeError(f"Cannot read frame {idx} from {video_path}")
-        frames.append(frame_bgr)
+            break
+        all_frames.append(frame_bgr)
     cap.release()
-    return frames  # list of BGR numpy arrays
+
+    vlen = len(all_frames)
+    if vlen < 1:
+        raise RuntimeError(f"No readable frames in {video_path}")
+
+    indices = get_frame_indices_middle(num_frames, vlen)
+    return [all_frames[i] for i in indices]
 
 
 def process_sample(args_tuple):
@@ -66,13 +75,7 @@ def process_sample(args_tuple):
     i, ann, data_root, motion_data_root, num_frames, jpeg_quality = args_tuple
     try:
         video_path = os.path.join(data_root, ann["video"])
-
-        cap = cv2.VideoCapture(video_path)
-        vlen = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        cap.release()
-
-        indices = get_frame_indices_middle(num_frames, vlen)
-        frames_bgr = read_video_cv2(video_path, indices)
+        frames_bgr = read_and_sample_video(video_path, num_frames)
 
         jpeg_frames = [encode_jpeg(f, jpeg_quality) for f in frames_bgr]
 
