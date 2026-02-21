@@ -33,10 +33,6 @@ echo "=== python ==="
 python -V
 which python
 
-# ---- pip cache (avoid /pjmhome permission issue) ----
-export PIP_CACHE_DIR="${HOME}/.cache/pip"
-mkdir -p "${PIP_CACHE_DIR}"
-
 # ---- GPU check ----
 echo "=== GPU check ==="
 if command -v nvidia-smi >/dev/null 2>&1; then
