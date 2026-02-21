@@ -397,14 +397,6 @@ def main(config):
         find_unused_parameters=find_unused_parameters,
     )
 
-    if is_main_process() and wandb_run is not None:
-        try:
-            wandb.watch(model)
-        except Exception as e:
-            logger.warn("Wandb is not working!!!")
-            logger.warn(f"Reason: {e}")
-            print(e)
-
     best = 0
     best_epoch = 0
     if type(config.best_key) is str:
