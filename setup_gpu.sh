@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_PREFIX="${SCRIPT_DIR}/.conda"
 
 # ========= 0. Activate env =========
+export PIP_CACHE_DIR="/work/04/gf15/f15016/.cache/pip"
+mkdir -p "${PIP_CACHE_DIR}"
 # (パスはあなたの環境に合わせて固定)
 source /work/04/gf15/f15016/apps/miniconda3/etc/profile.d/conda.sh
 eval "$(conda shell.bash hook)"
