@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ENV_PREFIX="${SCRIPT_DIR}/.conda"
 
 # ========= 0. Activate env =========
+source /work/04/gf15/f15016/apps/miniconda3/etc/profile.d/conda.sh
 eval "$(conda shell.bash hook)"
 conda activate "${ENV_PREFIX}"
 
