@@ -1,8 +1,8 @@
 #!/bin/sh
 #------ pjsub option --------#
-#PJM -L rscgrp=small-a
+#PJM -L rscgrp=regular-a
 #PJM -L node=1
-#PJM -L elapse=2:00:00
+#PJM -L elapse=48:00:00
 #PJM -g gf15
 #PJM -j
 #PJM -o flashattn_build.%j.log
