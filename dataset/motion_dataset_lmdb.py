@@ -103,6 +103,7 @@ class VidMotionTxtLmdbRetEvalDataset(Dataset):
         super().__init__()
         self.transform = transform
         self.num_frames = num_frames
+        self.max_txt_l = ann_file.get("max_txt_l", 32)
 
         lmdb_path = ann_file.lmdb_path
         logger.info(f"Opening LMDB (eval): {lmdb_path}")
