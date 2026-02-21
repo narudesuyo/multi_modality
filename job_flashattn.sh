@@ -7,7 +7,6 @@
 #PJM -j
 #PJM -o flashattn_build.%j.log
 #----------------------------#
-
 set -eu
 
 echo "=== Job start: $(date) ==="
