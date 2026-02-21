@@ -8,14 +8,16 @@ Usage:
         --ann path/to/annotation.json \
         --data-root path/to/data_root \
         --output path/to/output.lmdb \
-        --num-frames 8
+        --num-frames 8 \
+        --workers 8
 """
 
 import argparse
-import io
 import json
 import os
 import sys
+from functools import partial
+from multiprocessing import Pool
 
 import cv2
 import lmdb
@@ -59,34 +61,35 @@ def read_video_cv2(video_path, frame_indices):
     return frames  # list of BGR numpy arrays
 
 
-def process_sample(ann, data_root, motion_data_root, num_frames, jpeg_quality):
-    """Process one sample: decode video frames + load motion indices."""
-    video_path = os.path.join(data_root, ann["video"])
+def process_sample(args_tuple):
+    """Worker function: process one sample. Returns (index, packed_bytes) or (index, None)."""
+    i, ann, data_root, motion_data_root, num_frames, jpeg_quality = args_tuple
+    try:
+        video_path = os.path.join(data_root, ann["video"])
 
-    # Get frame count
-    cap = cv2.VideoCapture(video_path)
-    vlen = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    cap.release()
+        cap = cv2.VideoCapture(video_path)
+        vlen = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
 
-    indices = get_frame_indices_middle(num_frames, vlen)
-    frames_bgr = read_video_cv2(video_path, indices)
+        indices = get_frame_indices_middle(num_frames, vlen)
+        frames_bgr = read_video_cv2(video_path, indices)
 
-    jpeg_frames = []
-    for frame_bgr in frames_bgr:
-        jpeg_frames.append(encode_jpeg(frame_bgr, jpeg_quality))
+        jpeg_frames = [encode_jpeg(f, jpeg_quality) for f in frames_bgr]
 
-    # Motion indices
-    motion_path = os.path.join(motion_data_root, ann["tok_pose"])
-    data = np.load(motion_path)
-    motion_idx = data["idx"].flatten().astype(np.int64).tolist()
+        motion_path = os.path.join(motion_data_root, ann["tok_pose"])
+        data = np.load(motion_path)
+        motion_idx = data["idx"].flatten().astype(np.int64).tolist()
 
-    caption = ann["caption"]
+        value = msgpack.packb({
+            "frames": jpeg_frames,
+            "motion_idx": motion_idx,
+            "caption": ann["caption"],
+        }, use_bin_type=True)
 
-    return msgpack.packb({
-        "frames": jpeg_frames,
-        "motion_idx": motion_idx,
-        "caption": caption,
-    }, use_bin_type=True)
+        return (i, value)
+    except Exception as e:
+        print(f"[WARN] Skip sample {i}: {e}", file=sys.stderr)
+        return (i, None)
 
 
 def main():
@@ -98,6 +101,7 @@ def main():
     parser.add_argument("--num-frames", type=int, default=8, help="Number of frames to extract")
     parser.add_argument("--jpeg-quality", type=int, default=95, help="JPEG encode quality")
     parser.add_argument("--map-size-gb", type=float, default=50, help="LMDB map size in GB")
+    parser.add_argument("--workers", type=int, default=8, help="Number of parallel workers")
     args = parser.parse_args()
 
     motion_data_root = args.motion_data_root or args.data_root
@@ -105,29 +109,40 @@ def main():
     with open(args.ann, "r") as f:
         annos = json.load(f)
     print(f"Loaded {len(annos)} annotations from {args.ann}")
+    print(f"Using {args.workers} workers")
+
+    # Build work items
+    work_items = [
+        (i, ann, args.data_root, motion_data_root, args.num_frames, args.jpeg_quality)
+        for i, ann in enumerate(annos)
+    ]
 
     map_size = int(args.map_size_gb * 1024 ** 3)
     env = lmdb.open(args.output, map_size=map_size, readonly=False)
 
     num_ok = 0
     num_fail = 0
-    with env.begin(write=True) as txn:
-        for i, ann in enumerate(tqdm(annos, desc="Building LMDB")):
-            try:
-                value = process_sample(ann, args.data_root, motion_data_root, args.num_frames, args.jpeg_quality)
-                txn.put(f"{i:08d}".encode(), value)
-                num_ok += 1
-            except Exception as e:
-                print(f"[WARN] Skip sample {i}: {e}", file=sys.stderr)
-                num_fail += 1
 
-        # Store metadata
-        meta = msgpack.packb({
-            "num_samples": num_ok,
-            "num_frames": args.num_frames,
-            "jpeg_quality": args.jpeg_quality,
-        }, use_bin_type=True)
-        txn.put(b"__meta__", meta)
+    with Pool(processes=args.workers) as pool:
+        with env.begin(write=True) as txn:
+            for i, value in tqdm(
+                pool.imap_unordered(process_sample, work_items),
+                total=len(work_items),
+                desc="Building LMDB",
+            ):
+                if value is not None:
+                    txn.put(f"{i:08d}".encode(), value)
+                    num_ok += 1
+                else:
+                    num_fail += 1
+
+            # Store metadata
+            meta = msgpack.packb({
+                "num_samples": num_ok,
+                "num_frames": args.num_frames,
+                "jpeg_quality": args.jpeg_quality,
+            }, use_bin_type=True)
+            txn.put(b"__meta__", meta)
 
     env.close()
     print(f"Done. {num_ok} samples written, {num_fail} failed. Output: {args.output}")
