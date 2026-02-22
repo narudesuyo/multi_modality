@@ -9,14 +9,13 @@ Usage:
         --data-root path/to/data_root \
         --output path/to/output.lmdb \
         --num-frames 8 \
-        --workers 8
+        --workers 16
 """
 
 import argparse
 import json
 import os
 import sys
-from functools import partial
 from multiprocessing import Pool
 
 import cv2
@@ -24,6 +23,13 @@ import lmdb
 import msgpack
 import numpy as np
 from tqdm import tqdm
+
+try:
+    import decord
+    decord.bridge.set_bridge("native")
+    HAS_DECORD = True
+except ImportError:
+    HAS_DECORD = False
 
 
 def get_frame_indices_middle(num_frames, vlen):
@@ -45,29 +51,53 @@ def encode_jpeg(frame_bgr, quality=95):
 
 
 def read_and_sample_video(video_path, num_frames):
-    """Read video sequentially and return uniformly sampled frames (single pass, robust).
+    """Read only the needed frames using decord (fast seek), cv2 fallback."""
+    if HAS_DECORD:
+        try:
+            vr = decord.VideoReader(video_path, num_threads=1)
+            vlen = len(vr)
+            if vlen < 1:
+                raise RuntimeError(f"No frames in {video_path}")
+            indices = get_frame_indices_middle(num_frames, vlen)
+            frames_rgb = vr.get_batch(indices).asnumpy()  # [N, H, W, 3] RGB
+            # Convert RGB -> BGR for JPEG encoding (cv2 expects BGR)
+            return [frame[:, :, ::-1] for frame in frames_rgb]
+        except Exception:
+            pass  # Fall through to cv2
 
-    Uses sequential decode to avoid cv2 CAP_PROP_FRAME_COUNT inaccuracy.
-    """
+    # cv2 fallback: seek to specific frames instead of reading all
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"Cannot open video: {video_path}")
 
-    # Read all frames sequentially (robust against inaccurate frame count)
-    all_frames = []
-    while True:
-        ret, frame_bgr = cap.read()
-        if not ret:
-            break
-        all_frames.append(frame_bgr)
-    cap.release()
-
-    vlen = len(all_frames)
+    vlen = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if vlen < 1:
-        raise RuntimeError(f"No readable frames in {video_path}")
+        # Frame count unreliable — read all frames
+        all_frames = []
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            all_frames.append(frame)
+        cap.release()
+        vlen = len(all_frames)
+        if vlen < 1:
+            raise RuntimeError(f"No readable frames in {video_path}")
+        indices = get_frame_indices_middle(num_frames, vlen)
+        return [all_frames[i] for i in indices]
 
     indices = get_frame_indices_middle(num_frames, vlen)
-    return [all_frames[i] for i in indices]
+    frames = []
+    for idx in sorted(set(indices)):
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            raise RuntimeError(f"Cannot read frame {idx} from {video_path}")
+        frames.append((idx, frame))
+    cap.release()
+
+    idx_to_frame = {idx: frame for idx, frame in frames}
+    return [idx_to_frame[i] for i in indices]
 
 
 def process_sample(args_tuple):
@@ -104,7 +134,7 @@ def main():
     parser.add_argument("--num-frames", type=int, default=8, help="Number of frames to extract")
     parser.add_argument("--jpeg-quality", type=int, default=95, help="JPEG encode quality")
     parser.add_argument("--map-size-gb", type=float, default=50, help="LMDB map size in GB")
-    parser.add_argument("--workers", type=int, default=8, help="Number of parallel workers")
+    parser.add_argument("--workers", type=int, default=0, help="Number of parallel workers (0 = single process)")
     args = parser.parse_args()
 
     motion_data_root = args.motion_data_root or args.data_root
@@ -112,9 +142,8 @@ def main():
     with open(args.ann, "r") as f:
         annos = json.load(f)
     print(f"Loaded {len(annos)} annotations from {args.ann}")
-    print(f"Using {args.workers} workers")
+    print(f"Using {args.workers} workers (decord={'yes' if HAS_DECORD else 'no'})")
 
-    # Build work items
     work_items = [
         (i, ann, args.data_root, motion_data_root, args.num_frames, args.jpeg_quality)
         for i, ann in enumerate(annos)
@@ -126,26 +155,25 @@ def main():
     num_ok = 0
     num_fail = 0
 
-    with Pool(processes=args.workers) as pool:
-        with env.begin(write=True) as txn:
-            for i, value in tqdm(
-                pool.imap_unordered(process_sample, work_items),
-                total=len(work_items),
-                desc="Building LMDB",
-            ):
-                if value is not None:
-                    txn.put(f"{i:08d}".encode(), value)
-                    num_ok += 1
-                else:
-                    num_fail += 1
+    if args.workers > 0:
+        iterator = Pool(processes=args.workers).imap_unordered(process_sample, work_items)
+    else:
+        iterator = map(process_sample, work_items)
 
-            # Store metadata
-            meta = msgpack.packb({
-                "num_samples": num_ok,
-                "num_frames": args.num_frames,
-                "jpeg_quality": args.jpeg_quality,
-            }, use_bin_type=True)
-            txn.put(b"__meta__", meta)
+    with env.begin(write=True) as txn:
+        for i, value in tqdm(iterator, total=len(work_items), desc="Building LMDB"):
+            if value is not None:
+                txn.put(f"{i:08d}".encode(), value)
+                num_ok += 1
+            else:
+                num_fail += 1
+
+        meta = msgpack.packb({
+            "num_samples": num_ok,
+            "num_frames": args.num_frames,
+            "jpeg_quality": args.jpeg_quality,
+        }, use_bin_type=True)
+        txn.put(b"__meta__", meta)
 
     env.close()
     print(f"Done. {num_ok} samples written, {num_fail} failed. Output: {args.output}")

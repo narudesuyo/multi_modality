@@ -475,6 +475,7 @@ def create_loader(datasets, samplers, batch_size, num_workers, is_trains, collat
             collate_fn=collate_fn,
             drop_last=drop_last,
             persistent_workers=persistent_workers,
+            timeout=60,  # kill hung workers (e.g. decord hang on bad video)
         )
         loaders.append(loader)
     return loaders

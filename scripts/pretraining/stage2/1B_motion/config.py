@@ -6,7 +6,7 @@ from configs.model import *
 _HERE = _os.path.dirname(_os.path.abspath(__file__))           # .../scripts/pretraining/stage2/1B_motion
 _WORK_DIR = _os.path.abspath(_os.path.join(_HERE, "../../../.."))  # multi_modality root
 _EGOHAND_DIR = _os.path.abspath(_os.path.join(_WORK_DIR, "../../.."))  # 3 levels up = EgoHand
-_DATA_ROOT = _os.environ.get("DATA_ROOT", _os.path.join(_EGOHAND_DIR, "data"))
+_DATA_ROOT = _os.environ.get("DATA_ROOT", "/work/narus/data")
 
 # ========================= data ==========================
 # Register video_motion dataset
@@ -39,9 +39,9 @@ available_corpus["video_motion_lmdb_val"] = dict(
 # Switch between raw files and LMDB:
 #   raw:  video_motion_train / video_motion_val
 #   lmdb: video_motion_lmdb_train / video_motion_lmdb_val
-train_file = [available_corpus["video_motion_lmdb_train"]]
+train_file = [available_corpus["video_motion_train"]]
 
-test_file = dict(video_motion_val=available_corpus["video_motion_lmdb_val"])
+test_file = dict(video_motion_val=available_corpus["video_motion_val"])
 test_types = ["video_motion_val"]
 num_workers = 6
 
@@ -50,8 +50,8 @@ best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 2
-batch_size_test = 2
+batch_size = 16
+batch_size_test = 1
 max_txt_l = 32
 motion_T = 21  # motion sequence length (matching BodyTokenize)
 
@@ -63,6 +63,7 @@ inputs = dict(
         num_frames_test="${num_frames_test}",
         sample_type_test="middle",
         random_aug=False,
+        video_reader_type="img",  # read JPG frames instead of MP4 (decord-free)
     ),
     max_txt_l=dict(image="${max_txt_l}", video="${max_txt_l}", video_motion="${max_txt_l}", video_motion_lmdb="${max_txt_l}"),
     batch_size=dict(image="${batch_size}", video="${batch_size}", video_motion="${batch_size}", video_motion_lmdb="${batch_size}"),
@@ -91,9 +92,9 @@ model = dict(
         pretrained=_os.path.join(_WORK_DIR, "scripts/pretraining/stage1/1B_ft_k710_f8.pth"),
         use_checkpoint=True,
         checkpoint_num=40,
-        use_flash_attn=True,
-        use_fused_rmsnorm=True,
-        use_fused_mlp=True,
+        use_flash_attn=False,
+        use_fused_rmsnorm=False,
+        use_fused_mlp=False,
         # clip teacher (disabled for motion experiment)
         clip_teacher=None,
         clip_input_resolution=224,
@@ -168,10 +169,10 @@ evaluation = dict(
 )
 
 use_half_precision = True
-use_bf16 = True
+use_bf16 = False  # V100 does not support bf16; use fp16 instead
 
 gradient_checkpointing = True
-use_flash_sdp = True
+use_flash_sdp = False
 use_mem_efficient_sdp = False and not use_flash_sdp
 compile_model = False
 
@@ -204,5 +205,5 @@ no_save_params_prefix = ["motion_encoder.encB", "motion_encoder.encH"]
 
 deepspeed = dict(
     enable=True,
-    stage=1,
+    stage=2,
 )

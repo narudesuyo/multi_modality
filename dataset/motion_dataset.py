@@ -12,6 +12,7 @@ import logging
 import os
 import json
 import random
+import signal
 import io
 
 import numpy as np
@@ -78,24 +79,21 @@ class VidMotionTxtPtTrainDataset(BaseDataset):
         if '.json' in self.label_file:
             logger.info(f"Loading json file {self.label_file}")
 
-            if get_local_rank() == 0:
-                try:
-                    with io.BytesIO(self.client.get(self.label_file)) as f:
-                        annos = json.load(f)
-                except Exception:
-                    with open(self.label_file, 'r') as f:
-                        annos = json.load(f)
+            try:
+                with io.BytesIO(self.client.get(self.label_file)) as f:
+                    annos = json.load(f)
+            except Exception:
+                with open(self.label_file, 'r') as f:
+                    annos = json.load(f)
 
-                if not ann_file.get("jump_filter", False):
-                    captions = [pre_text(anno["caption"]) for anno in annos]
-                    captions_len = [len(c.split()) for c in captions]
-                    logger.info(f"Num samples: {len(captions)}")
-                    logger.info(f"Num samples too short: {sum(l < self.min_caption_length for l in captions_len)}")
-                    annos = [anno for anno, l in zip(annos, captions_len) if l >= self.min_caption_length]
-            else:
-                annos = []
+            if not ann_file.get("jump_filter", False):
+                captions = [pre_text(anno["caption"]) for anno in annos]
+                captions_len = [len(c.split()) for c in captions]
+                logger.info(f"Num samples: {len(captions)}")
+                logger.info(f"Num samples too short: {sum(l < self.min_caption_length for l in captions_len)}")
+                annos = [anno for anno, l in zip(annos, captions_len) if l >= self.min_caption_length]
 
-            self.anno = TorchShmSerializedList(annos)
+            self.anno = annos
             self.num_examples = len(self.anno)
             logger.info(f"num_examples: {self.num_examples}")
         else:
@@ -123,27 +121,40 @@ class VidMotionTxtPtTrainDataset(BaseDataset):
         idx = data["idx"].flatten().astype(np.int64)
         return torch.from_numpy(idx)
 
+    _VIDEO_TIMEOUT = 30  # seconds; kill decord if it hangs longer than this
+
+    @staticmethod
+    def _alarm_handler(signum, frame):
+        raise TimeoutError("Video loading timed out (decord hang)")
+
     def __getitem__(self, index):
-        try:
-            ann = self.get_anno(index)
-            caption = pre_text(ann["caption"])
+        for _retry in range(10):
+            ann = None
+            try:
+                ann = self.get_anno(index)
+                caption = pre_text(ann["caption"])
 
-            # Load video
-            logger.debug(f"Loading video: {ann['video']}")
-            video, index = self.load_and_transform_media_data(index, ann["video"])
+                # Load video with timeout to catch decord hangs
+                logger.info(f"[worker] Loading video idx={index}: {ann['video']}")
+                old_handler = signal.signal(signal.SIGALRM, self._alarm_handler)
+                signal.alarm(self._VIDEO_TIMEOUT)
+                try:
+                    video, index = self.load_and_transform_media_data(index, ann["video"])
+                finally:
+                    signal.alarm(0)
+                    signal.signal(signal.SIGALRM, old_handler)
 
-            # Load tokenized pose indices
-            logger.debug(f"Loading tok_pose: {ann['tok_pose']}")
-            motion_indices = self.load_tok_pose(ann["tok_pose"])
+                # Load tokenized pose indices
+                motion_indices = self.load_tok_pose(ann["tok_pose"])
 
-            media = [video, motion_indices]
-            return media, caption, index
+                media = [video, motion_indices]
+                return media, caption, index
 
-        except Exception as e:
-            logger.warning(f"Caught exception {e} when loading {ann}")
-            print(e)
-            index = np.random.randint(0, len(self))
-            return self.__getitem__(index)
+            except Exception as e:
+                logger.warning(f"Caught exception {e} when loading idx={index} {ann}")
+                index = np.random.randint(0, len(self))
+
+        raise RuntimeError(f"Failed to load data after 10 retries")
 
 
 class VidMotionTxtRetEvalDataset(BaseDataset):

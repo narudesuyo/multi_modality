@@ -18,6 +18,7 @@ export PATH="${CONDA_ENV}/bin:${PATH}"
 
 export MASTER_PORT=$((12000 + RANDOM % 20000))
 export OMP_NUM_THREADS=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export PYTHONPATH="${PYTHONPATH:+${PYTHONPATH}:}./"
 # wandb: default online. Set WANDB_MODE=offline for local-only logging.
 export WANDB_MODE="${WANDB_MODE:-online}"
@@ -47,5 +48,4 @@ torchrun \
     "$@" \
     tasks/pretrain.py \
     "${SCRIPT_DIR}/config.py" \
-    output_dir "${OUTPUT_DIR}" \
-    num_workers 0
+    output_dir "${OUTPUT_DIR}"

@@ -131,8 +131,9 @@ def read_frames_gif(
 
 
 def read_frames_decord(
-        video_path, num_frames, sample='rand', fix_start=None, 
-        max_num_frames=-1, client=None, trimmed30=False
+        video_path, num_frames, sample='rand', fix_start=None,
+        max_num_frames=-1, client=None, trimmed30=False,
+        short_side_size=320
     ):
     num_threads = 1 if video_path.endswith('.webm') else 0 # make ssv2 happy
     if "s3://" in video_path:
@@ -140,9 +141,9 @@ def read_frames_decord(
         # print(f"\033[1;31;40m {video_path} ok: {video_bytes is None} \033[0m")
         if video_bytes is None:
             logger.warning(f"Failed to load {video_path}")
-        video_reader = VideoReader(io.BytesIO(video_bytes), num_threads=num_threads) 
+        video_reader = VideoReader(io.BytesIO(video_bytes), num_threads=num_threads, width=short_side_size, height=short_side_size)
     else:
-        video_reader = VideoReader(video_path, num_threads=num_threads)
+        video_reader = VideoReader(video_path, num_threads=num_threads, width=short_side_size, height=short_side_size)
     vlen = len(video_reader)
  
     fps = video_reader.get_avg_fps()
@@ -176,6 +177,7 @@ def read_frames_img(
         for path in os.listdir(video_path):
             if path.startswith('img'):
                 img_list.append(path)
+    img_list.sort()  # ensure frames are in temporal order
 
     vlen = len(img_list)
 
