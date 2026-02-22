@@ -99,8 +99,8 @@ def main():
     parser.add_argument("--split", choices=["train", "val"], default="train")
     parser.add_argument("--quality", type=int, default=2,
                         help="JPEG quality (1=best, 5=good, 10=low). Default 2.")
-    parser.add_argument("--workers", type=int, default=8,
-                        help="Parallel extraction workers. Default 8.")
+    parser.add_argument("--workers", type=int, default=0,
+                        help="Parallel extraction workers. 0=sequential. Default 0.")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip clips whose frame dirs already exist.")
     parser.add_argument("--timeout", type=int, default=60,
@@ -155,24 +155,19 @@ def main():
     print(f"Unique video clips: {len(unique_tasks)}")
     print()
 
-    # Extract frames in parallel
+    # Extract frames
     results = {}  # frames_abs → (ok, msg)
+    done = 0
+    n_ok = 0
+    n_bad = 0
 
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        futures = {}
+    if args.workers <= 0:
+        # Sequential execution
         for mp4_abs, frames_abs, frames_rel, indices in unique_tasks:
-            fut = pool.submit(
-                extract_one, mp4_abs, frames_abs,
+            ok, msg = extract_one(
+                mp4_abs, frames_abs,
                 quality=args.quality, skip_existing=args.skip_existing,
             )
-            futures[fut] = (frames_abs, frames_rel, indices)
-
-        done = 0
-        n_ok = 0
-        n_bad = 0
-        for fut in as_completed(futures):
-            frames_abs, frames_rel, indices = futures[fut]
-            ok, msg = fut.result()
             results[frames_abs] = (ok, msg)
             done += 1
             if ok:
@@ -182,6 +177,29 @@ def main():
             if done % 500 == 0 or not ok:
                 status = "OK" if ok else "BAD"
                 print(f"[{done:5d}/{len(unique_tasks)}] {status:3s} {frames_rel}  {msg}")
+    else:
+        # Parallel execution
+        with ProcessPoolExecutor(max_workers=args.workers) as pool:
+            futures = {}
+            for mp4_abs, frames_abs, frames_rel, indices in unique_tasks:
+                fut = pool.submit(
+                    extract_one, mp4_abs, frames_abs,
+                    quality=args.quality, skip_existing=args.skip_existing,
+                )
+                futures[fut] = (frames_abs, frames_rel, indices)
+
+            for fut in as_completed(futures):
+                frames_abs, frames_rel, indices = futures[fut]
+                ok, msg = fut.result()
+                results[frames_abs] = (ok, msg)
+                done += 1
+                if ok:
+                    n_ok += 1
+                else:
+                    n_bad += 1
+                if done % 500 == 0 or not ok:
+                    status = "OK" if ok else "BAD"
+                    print(f"[{done:5d}/{len(unique_tasks)}] {status:3s} {frames_rel}  {msg}")
 
     print()
     print(f"Done: {n_ok} ok, {n_bad} bad out of {len(unique_tasks)} unique clips")

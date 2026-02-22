@@ -18,6 +18,14 @@ available_corpus["video_motion_train"] = dict(
     normalize_motion=False,
 )
 
+available_corpus["video_motion_assembly101_train"] = dict(
+    anno_path=_os.path.join(_HERE, "annotation_assembly101_train.json"),
+    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    media_type="video_motion",
+    normalize_motion=False,
+)
+
 available_corpus["video_motion_val"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_atomic_val.json"),
     data_root=_os.path.join(_DATA_ROOT, "val/takes_clipped/egoexo"),
@@ -39,7 +47,11 @@ available_corpus["video_motion_lmdb_val"] = dict(
 # Switch between raw files and LMDB:
 #   raw:  video_motion_train / video_motion_val
 #   lmdb: video_motion_lmdb_train / video_motion_lmdb_val
-train_file = [available_corpus["video_motion_train"]]
+# Assembly101 only (EgoExo4D frames not yet available)
+train_file = [
+    # available_corpus["video_motion_train"],              # EgoExo4D (~1048)
+    available_corpus["video_motion_assembly101_train"],   # Assembly101 (~3405)
+]
 
 test_file = dict(video_motion_val=available_corpus["video_motion_val"])
 test_types = ["video_motion_val"]
