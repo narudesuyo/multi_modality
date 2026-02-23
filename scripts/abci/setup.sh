@@ -98,7 +98,7 @@ if [ -d "${ENV_PREFIX}" ]; then
     echo "Conda env already exists at ${ENV_PREFIX}, activating..."
 else
     echo "Creating new conda env from environment.yml..."
-    conda env create -f "${PROJECT_ROOT}/environment.yml" --prefix "${ENV_PREFIX}" --yes
+    conda env create -f "${PROJECT_ROOT}/environment.yml" --prefix "${ENV_PREFIX}" --override-channels --yes
 fi
 
 conda activate "${ENV_PREFIX}"
