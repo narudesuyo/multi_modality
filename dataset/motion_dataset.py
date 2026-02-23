@@ -135,7 +135,7 @@ class VidMotionTxtPtTrainDataset(BaseDataset):
                 caption = pre_text(ann["caption"])
 
                 # Load video with timeout to catch decord hangs
-                logger.info(f"[worker] Loading video idx={index}: {ann['video']}")
+                logger.debug(f"[worker] Loading video idx={index}: {ann['video']}")
                 old_handler = signal.signal(signal.SIGALRM, self._alarm_handler)
                 signal.alarm(self._VIDEO_TIMEOUT)
                 try:

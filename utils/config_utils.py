@@ -57,7 +57,8 @@ def setup_deepspeed_zero_config(stage):
             "reduce_bucket_size": 5e8,
             "allgather_bucket_size": 5e8,
             "offload_optimizer": {
-                "device": "cpu"
+                "device": "cpu",
+                "pin_memory": False
             },
         }
     if stage == 3:

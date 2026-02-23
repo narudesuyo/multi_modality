@@ -76,6 +76,35 @@ class InternVideo2_Stage2_Motion(nn.Module):
             if config.model.get("freeze_motion", True):
                 self.freeze_motion()
 
+            # ---- Motion MLM (predict masked motion codebook indices) ----
+            if getattr(self.loss_weight, 'motion_mlm', 0) != 0:
+                codebook_size = self.motion_encoder.codebook_B.shape[0]
+                body_tokens = self.motion_encoder.body_tokens_per_t
+                hand_tokens = self.motion_encoder.hand_tokens_per_t
+                motion_d = self.motion_encoder.d_model  # 768
+
+                self.motion_mask_token = nn.Parameter(torch.zeros(1, 1, motion_d))
+                self.motion_pos_embed = nn.Parameter(torch.zeros(1, 64, motion_d))
+                self.motion_mlm_text_proj = nn.Linear(self.text_width, motion_d)
+                self.motion_mlm_transformer = nn.TransformerDecoder(
+                    nn.TransformerDecoderLayer(
+                        d_model=motion_d, nhead=8, dim_feedforward=3072,
+                        batch_first=True, norm_first=True),
+                    num_layers=4)
+                self.motion_mlm_head_B = nn.ModuleList(
+                    [nn.Linear(motion_d, codebook_size) for _ in range(body_tokens)])
+                self.motion_mlm_head_H = nn.ModuleList(
+                    [nn.Linear(motion_d, codebook_size) for _ in range(hand_tokens)])
+                self.motion_mlm_mask_ratio = config.criterion.get(
+                    'motion_mlm_mask_ratio', 0.15)
+
+                nn.init.normal_(self.motion_mask_token, std=0.02)
+                nn.init.normal_(self.motion_pos_embed, std=0.02)
+                logger.info(
+                    f"Motion MLM enabled: codebook_size={codebook_size}, "
+                    f"body_heads={body_tokens}, hand_heads={hand_tokens}, "
+                    f"mask_ratio={self.motion_mlm_mask_ratio}")
+
         # ---- Projection layers ----
         self.vision_proj = nn.Linear(self.vision_proj_width, self.contra_dim)
         self.text_proj = nn.Linear(self.text_width, self.contra_dim)
@@ -112,7 +141,8 @@ class InternVideo2_Stage2_Motion(nn.Module):
     def use_motion(self):
         lw = self.loss_weight
         return (lw.mtc != 0 or lw.vmc != 0 or lw.vmtc != 0 or
-                lw.mtm != 0 or lw.vmtm != 0 or lw.mmlm != 0 or lw.vmmlm != 0)
+                lw.mtm != 0 or lw.vmtm != 0 or lw.mmlm != 0 or lw.vmmlm != 0 or
+                getattr(lw, 'motion_mlm', 0) != 0)
 
     def freeze_vision(self):
         for p in self.vision_encoder.parameters():
@@ -309,6 +339,13 @@ class InternVideo2_Stage2_Motion(nn.Module):
         else:
             loss_vmmlm = torch.tensor(0)
 
+        # Motion MLM loss (video+text+motion context → predict masked motion tokens)
+        if self.is_pretrain and getattr(self.loss_weight, 'motion_mlm', 0) != 0:
+            loss_motion_mlm = self.forward_motion_mlm(
+                motion_indices, text_embeds, text.attention_mask, vision_embeds)
+        else:
+            loss_motion_mlm = torch.tensor(0)
+
         return dict(
             loss_uta=loss_uta * self.loss_weight.uta,
             loss_vtc=loss_vtc * self.loss_weight.vtc,
@@ -322,6 +359,7 @@ class InternVideo2_Stage2_Motion(nn.Module):
             loss_vmtm=loss_vmtm * self.loss_weight.vmtm,
             loss_mmlm=loss_mmlm * self.loss_weight.mmlm,
             loss_vmmlm=loss_vmmlm * self.loss_weight.vmmlm,
+            loss_motion_mlm=loss_motion_mlm * getattr(self.loss_weight, 'motion_mlm', 0),
         )
 
     # ================================================================
@@ -432,6 +470,92 @@ class InternVideo2_Stage2_Motion(nn.Module):
         motion_embeds, pooled_motion_embeds = self.motion_encoder.forward_from_indices(motion_indices)
         motion_embeds = self.vm_concat_motion_proj(motion_embeds)
         return motion_embeds, pooled_motion_embeds
+
+    def forward_motion_mlm(self, motion_indices, text_embeds, text_attention_mask,
+                           vision_embeds=None):
+        """Predict masked motion timestep codebook indices (Motion MLM).
+
+        Context: video + text + unmasked motion → predict masked motion tokens.
+
+        Args:
+            motion_indices: [B, N] flat token indices
+            text_embeds: [B, seq_len, text_width] from text encoder
+            text_attention_mask: [B, seq_len] attention mask (1=real, 0=pad)
+            vision_embeds: [B, n_vis, 768] from vision encoder (optional)
+        Returns:
+            loss: scalar cross-entropy loss averaged over 8 prediction heads
+        """
+        B = motion_indices.shape[0]
+        tokens_per_t = self.motion_encoder.tokens_per_t
+        body_tokens = self.motion_encoder.body_tokens_per_t
+        hand_tokens = self.motion_encoder.hand_tokens_per_t
+
+        # Reshape to [B, T, 8] for target indices
+        indices = motion_indices.reshape(B, -1, tokens_per_t)  # [B, T, 8]
+        T = indices.shape[1]
+
+        # Get motion embeddings from frozen encoder (stop grad)
+        with torch.no_grad():
+            motion_embeds, _ = self.motion_encoder.forward_from_indices(motion_indices)
+        motion_embeds = motion_embeds.detach()  # [B, T, 768]
+
+        # Random mask timesteps
+        num_mask = max(1, int(T * self.motion_mlm_mask_ratio))
+        noise = torch.rand(B, T, device=indices.device)
+        mask_topk = noise.argsort(dim=1)[:, :num_mask]  # [B, num_mask]
+        mask = torch.zeros(B, T, dtype=torch.bool, device=indices.device)
+        mask.scatter_(1, mask_topk, True)
+
+        # Replace masked positions with learnable [MASK] token
+        mask_3d = mask.unsqueeze(-1)  # [B, T, 1]
+        masked_embeds = torch.where(
+            mask_3d, self.motion_mask_token.expand(B, T, -1), motion_embeds)
+
+        # Add positional embedding
+        masked_embeds = masked_embeds + self.motion_pos_embed[:, :T, :]
+
+        # Build memory: text (+ vision if available)
+        text_memory = self.motion_mlm_text_proj(text_embeds)  # [B, seq_len, 768]
+
+        if vision_embeds is not None:
+            # vision_embeds already [B, n_vis, 768] via vm_concat_vision_proj
+            memory = torch.cat([text_memory, vision_embeds], dim=1)
+            vis_mask = torch.ones(B, vision_embeds.shape[1],
+                                  device=text_attention_mask.device,
+                                  dtype=text_attention_mask.dtype)
+            full_mask = torch.cat([text_attention_mask, vis_mask], dim=1)
+            memory_key_padding_mask = ~full_mask.bool()
+        else:
+            memory = text_memory
+            memory_key_padding_mask = (
+                ~text_attention_mask.bool() if text_attention_mask is not None
+                else None)
+
+        # TransformerDecoder: self-attn on motion + cross-attn to text+vision
+        decoded = self.motion_mlm_transformer(
+            tgt=masked_embeds,
+            memory=memory,
+            memory_key_padding_mask=memory_key_padding_mask,
+        )  # [B, T, 768]
+
+        # Extract masked positions and predict codebook indices
+        masked_decoded = decoded[mask]   # [num_masked_total, 768]
+        masked_targets = indices[mask]   # [num_masked_total, 8]
+
+        targets_B = masked_targets[:, :body_tokens]  # [num_masked_total, 4]
+        targets_H = masked_targets[:, body_tokens:]   # [num_masked_total, 4]
+
+        # Predict with 8 heads (4 body + 4 hand), average loss
+        loss = torch.tensor(0.0, device=masked_decoded.device, dtype=masked_decoded.dtype)
+        for i in range(body_tokens):
+            logits = self.motion_mlm_head_B[i](masked_decoded)
+            loss = loss + nn.functional.cross_entropy(logits.float(), targets_B[:, i])
+        for i in range(hand_tokens):
+            logits = self.motion_mlm_head_H[i](masked_decoded)
+            loss = loss + nn.functional.cross_entropy(logits.float(), targets_H[:, i])
+
+        loss = loss / (body_tokens + hand_tokens)
+        return loss
 
     def encode_text(self, text):
         text_output = self.get_text_encoder()(

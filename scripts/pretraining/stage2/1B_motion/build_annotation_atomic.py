@@ -6,8 +6,9 @@ with tokenized pose files from BodyTokenize inference_atomic.py.
 Generates entries for both ego and exo views (as separate training samples).
 
 Usage:
-    python build_annotation_atomic.py [--split {train,val}]
+    python build_annotation_atomic.py [--split {train,val}] [--exo-only]
     python build_annotation_atomic.py --split val --output annotation_atomic_val.json
+    python build_annotation_atomic.py --exo-only  # exo view only
 """
 
 import argparse
@@ -20,7 +21,7 @@ from pathlib import Path
 _DATA_ROOT_BASE = os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data")
 
 
-def build_annotation(intermediate_json: str, output_path: str, data_root: str):
+def build_annotation(intermediate_json: str, output_path: str, data_root: str, exo_only: bool = False):
     with open(intermediate_json, "r") as f:
         entries = json.load(f)
 
@@ -57,7 +58,7 @@ def build_annotation(intermediate_json: str, output_path: str, data_root: str):
             tok_rel = os.path.join("tok_pose_atomic_40", take_name, tok_fname)
 
             # Ego view
-            if "video_ego" in entry:
+            if not exo_only and "video_ego" in entry:
                 video_path = os.path.join(data_root, entry["video_ego"])
                 if os.path.isfile(video_path):
                     annotations.append({
@@ -104,6 +105,8 @@ if __name__ == "__main__":
                         help="Path to intermediate JSON from prepare_atomic_clips.py")
     parser.add_argument("--output", type=str, default=None,
                         help="Output annotation JSON path")
+    parser.add_argument("--exo-only", action="store_true",
+                        help="Only include exo view (skip ego)")
     args = parser.parse_args()
 
     _here = os.path.dirname(__file__)
@@ -118,4 +121,4 @@ if __name__ == "__main__":
 
     data_root = os.path.join(_DATA_ROOT_BASE, f"{args.split}/takes_clipped/egoexo")
 
-    build_annotation(args.intermediate_json, args.output, data_root)
+    build_annotation(args.intermediate_json, args.output, data_root, exo_only=args.exo_only)

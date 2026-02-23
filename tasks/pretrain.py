@@ -71,6 +71,7 @@ def _format_loss_name(name: str) -> str:
         "vtc": "V_T_cont", "vtm": "V_T_match", "mlm": "V_mlm", "uta": "V_uta",
         "mtc": "M_T_cont", "mtm": "M_T_match", "mmlm": "M_mlm",
         "vmc": "VM_cont", "vmtc": "VM_T_cont", "vmtm": "VM_T_match", "vmmlm": "VM_mlm",
+        "motion_mlm": "VT_tok_mlm",
     }
     key = name[len("loss_"):] if name.startswith("loss_") else name
     return _EXPLICIT_MAP.get(key, key)

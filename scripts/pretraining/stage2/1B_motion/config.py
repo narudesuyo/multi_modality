@@ -34,6 +34,14 @@ available_corpus["video_motion_val"] = dict(
     normalize_motion=False,
 )
 
+available_corpus["video_motion_assembly101_val"] = dict(
+    anno_path=_os.path.join(_HERE, "annotation_assembly101_validation.json"),
+    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    media_type="video_motion",
+    normalize_motion=False,
+)
+
 # LMDB versions (faster I/O — build with: python tools/build_lmdb.py)
 available_corpus["video_motion_lmdb_train"] = dict(
     lmdb_path=_os.path.join(_DATA_ROOT, "lmdb/train.lmdb"),
@@ -47,22 +55,40 @@ available_corpus["video_motion_lmdb_val"] = dict(
 # Switch between raw files and LMDB:
 #   raw:  video_motion_train / video_motion_val
 #   lmdb: video_motion_lmdb_train / video_motion_lmdb_val
-# Assembly101 only (EgoExo4D frames not yet available)
+# --- Test mode: 10-sample subsets from both datasets ---
+available_corpus["video_motion_egoexo_test10"] = dict(
+    anno_path=_os.path.join(_HERE, "annotation_atomic_train_frames_test10.json"),
+    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
+    media_type="video_motion",
+    normalize_motion=False,
+)
+available_corpus["video_motion_assembly101_test10"] = dict(
+    anno_path=_os.path.join(_HERE, "annotation_assembly101_train_test10.json"),
+    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    media_type="video_motion",
+    normalize_motion=False,
+)
+
 train_file = [
-    # available_corpus["video_motion_train"],              # EgoExo4D (~1048)
-    available_corpus["video_motion_assembly101_train"],   # Assembly101 (~3405)
+    available_corpus["video_motion_egoexo_test10"],       # EgoExo4D test (10)
+    available_corpus["video_motion_assembly101_train"],    # Assembly101 full (~3,405)
 ]
 
-test_file = dict(video_motion_val=available_corpus["video_motion_val"])
-test_types = ["video_motion_val"]
-num_workers = 6
+test_file = dict(
+    video_motion_val=available_corpus["video_motion_val"],
+    video_motion_assembly101_val=available_corpus["video_motion_assembly101_val"],
+)
+test_types = ["video_motion_val", "video_motion_assembly101_val"]
+num_workers = 0  # sequential for debugging
 
 best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 16
+batch_size = 32
 batch_size_test = 1
 max_txt_l = 32
 motion_T = 21  # motion sequence length (matching BodyTokenize)
@@ -152,9 +178,12 @@ criterion = dict(
         vmtc=1.0,
         vmtm=1.0,
         vmmlm=1.0,
+        # motion token prediction
+        motion_mlm=1.0,
     ),
     vtm_hard_neg=True,
     mlm_masking_prob=0.5,
+    motion_mlm_mask_ratio=0.15,
     distill_final_features=True,
     clip_loss_ratio=[1., 1.],
     uta_image_only=False,

@@ -2,13 +2,13 @@
 # Stage2 training: Video + Motion + Text (root-dir wrapper)
 #
 # Usage:
-#   bash run_stage2.sh                    # use all available GPUs
-#   bash run_stage2.sh --nproc_per_node 1 # force 1 GPU
-#   CUDA_VISIBLE_DEVICES=0,1 bash run_stage2.sh  # select GPUs
+#   bash scripts/local/run_stage2.sh                    # use all available GPUs
+#   bash scripts/local/run_stage2.sh --nproc_per_node 1 # force 1 GPU
+#   CUDA_VISIBLE_DEVICES=0,1 bash scripts/local/run_stage2.sh  # select GPUs
 
 set -euo pipefail
 
-WORK_DIR="$(cd "$(dirname "$0")" && pwd)"
+WORK_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 CONFIG_DIR="${WORK_DIR}/scripts/pretraining/stage2/1B_motion"
 cd "$WORK_DIR"
 

@@ -1,3 +1,7 @@
+# NOTE: This file is kept for reference only.
+# The canonical dependency list is in pyproject.toml.
+# Use `uv sync` (or `bash install_uv.sh`) to install.
+
 apex==0.9.10dev
 # av==11.0.0
 decord==0.6.0

@@ -72,6 +72,36 @@ python scripts/pretraining/stage2/1B_motion/build_annotation_assembly101.py
 
 出力: `annotation_assembly101_train.json` (EgoExo4D と同一フォーマット)
 
+### Validation split
+
+Train と同じパイプラインを `--split validation` で実行する (382 samples)。
+
+```bash
+# Step 1: フレーム + kp3d
+python scripts/pretraining/stage2/1B_motion/prepare_assembly101_clips.py \
+  --split validation --device cuda
+
+# Step 2: tok_pose
+cd /home/narus/2026/EgoHand/BodyTokenize
+python inference_atomic.py \
+  --data-root /work/narus/data/train/takes_clipped/assembly101 \
+  --motion-dir /work/narus/data/train/takes_clipped/assembly101/motion_atomic \
+  --output-dir /work/narus/data/train/takes_clipped/assembly101/tok_pose_atomic_40 \
+  --annotation-json /home/narus/2026/EgoHand/InternVideo/InternVideo2/multi_modality/scripts/pretraining/stage2/1B_motion/annotation_assembly101_validation_intermediate.json
+
+# Step 3: annotation JSON
+cd /home/narus/2026/EgoHand/InternVideo/InternVideo2/multi_modality
+python scripts/pretraining/stage2/1B_motion/build_annotation_assembly101.py --split validation
+```
+
+出力: `annotation_assembly101_validation.json` (382 entries)
+
+`config.py` で evaluation に使う:
+```python
+test_file = dict(video_motion_assembly101_val=available_corpus["video_motion_assembly101_val"])
+test_types = ["video_motion_assembly101_val"]
+```
+
 ### Step 4: Mixed Training
 
 `config.py` は修正済み。`train_file` に EgoExo4D + Assembly101 の両方が含まれている。
