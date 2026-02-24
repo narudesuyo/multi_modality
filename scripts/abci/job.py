@@ -50,7 +50,7 @@ class ABCIJobConfig:
     # PBS queue name (e.g. rt_HG, rt_AF, rt_AG) or reservation ID.
     queue: str = "rt_HG"
     # ABCI project group.
-    project: str = "INSERT_GROUP_HERE"
+    project: str = "gch51606"
     # Number of compute nodes (-l select=N).
     num_nodes: int = 1
     # Wall-clock time limit (HH:MM:SS).
@@ -73,10 +73,18 @@ class ABCIJobConfig:
     output_dir: str | None = None
     # Number of dataloader workers per GPU.
     num_workers: int = 0
+    # Use bf16 instead of fp16 (for H200/A100/H100 GPUs).
+    use_bf16: bool = False
     # Extra arguments passed to tasks/pretrain.py.
     extra_args: tuple[str, ...] = ()
 
     # ---- Environment paths ----
+    # DATA_ROOT for dataset paths. Empty = use config.py default.
+    data_root: str = "/groups/gch51606/takehiko.ohkawa/tmp_data"
+    # CKPT_DIR for pretrained weights. Empty = use config.py default.
+    ckpt_dir: str = "/groups/gch51606/takehiko.ohkawa/tmp_data"
+    # BODYTOKENIZE_DIR for BodyTokenize source code. Empty = use config.py default.
+    bodytokenize_dir: str = "/home/ach18478ho/code/tmp_code/BodyTokenize"
     # Conda environment prefix. Set to empty string to skip conda activation.
     conda_prefix: str = ""
     # CUDA module to load (e.g. cuda/12.2, cuda/12.1).
@@ -123,6 +131,8 @@ def render_pbs_script(config: ABCIJobConfig, job_name: str) -> str:
 
     # --- Extra args ---
     extra = ""
+    if config.use_bf16:
+        extra += ' use_bf16 True'
     for arg in config.extra_args:
         extra += f" {arg}"
 
@@ -147,6 +157,14 @@ def render_pbs_script(config: ABCIJobConfig, job_name: str) -> str:
 
     # --- Env var exports ---
     env_block = ""
+    # Auto-inject data/ckpt path env vars for ABCI
+    for var_name, var_val in [
+        ("DATA_ROOT", config.data_root),
+        ("CKPT_DIR", config.ckpt_dir),
+        ("BODYTOKENIZE_DIR", config.bodytokenize_dir),
+    ]:
+        if var_val:
+            env_block += f'export {var_name}="{var_val}"\n'
     for entry in config.env:
         key, _, value = entry.partition("=")
         env_block += f'export {key}="{value}"\n'

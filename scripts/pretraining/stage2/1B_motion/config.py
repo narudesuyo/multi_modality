@@ -7,37 +7,41 @@ _HERE = _os.path.dirname(_os.path.abspath(__file__))           # .../scripts/pre
 _WORK_DIR = _os.path.abspath(_os.path.join(_HERE, "../../../.."))  # multi_modality root
 _EGOHAND_DIR = _os.path.abspath(_os.path.join(_WORK_DIR, "../../.."))  # 3 levels up = EgoHand
 _DATA_ROOT = _os.environ.get("DATA_ROOT", "/work/narus/data")
+_CKPT_DIR = _os.environ.get("CKPT_DIR", "")
+_BODYTOKENIZE_DIR = _os.environ.get(
+    "BODYTOKENIZE_DIR", _os.path.join(_EGOHAND_DIR, "BodyTokenize")
+)
 
 # ========================= data ==========================
 # Register video_motion dataset
 available_corpus["video_motion_train"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_atomic_train.json"),
-    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
-    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
+    data_root=_os.path.join(_DATA_ROOT, "EgoExo4D/processed/train"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "EgoExo4D/processed/train"),
     media_type="video_motion",
     normalize_motion=False,
 )
 
 available_corpus["video_motion_assembly101_train"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_assembly101_train.json"),
-    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
-    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    data_root=_os.path.join(_DATA_ROOT, "Assembly101/processed/train"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "Assembly101/processed/train"),
     media_type="video_motion",
     normalize_motion=False,
 )
 
 available_corpus["video_motion_val"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_atomic_val.json"),
-    data_root=_os.path.join(_DATA_ROOT, "val/takes_clipped/egoexo"),
-    motion_data_root=_os.path.join(_DATA_ROOT, "val/takes_clipped/egoexo"),
+    data_root=_os.path.join(_DATA_ROOT, "EgoExo4D/processed/val"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "EgoExo4D/processed/val"),
     media_type="video_motion",
     normalize_motion=False,
 )
 
 available_corpus["video_motion_assembly101_val"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_assembly101_validation.json"),
-    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
-    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    data_root=_os.path.join(_DATA_ROOT, "Assembly101/processed/validation"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "Assembly101/processed/validation"),
     media_type="video_motion",
     normalize_motion=False,
 )
@@ -58,29 +62,28 @@ available_corpus["video_motion_lmdb_val"] = dict(
 # --- Test mode: 10-sample subsets from both datasets ---
 available_corpus["video_motion_egoexo_test10"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_atomic_train_frames_test10.json"),
-    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
-    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/egoexo"),
+    data_root=_os.path.join(_DATA_ROOT, "EgoExo4D/processed/train"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "EgoExo4D/processed/train"),
     media_type="video_motion",
     normalize_motion=False,
 )
 available_corpus["video_motion_assembly101_test10"] = dict(
     anno_path=_os.path.join(_HERE, "annotation_assembly101_train_test10.json"),
-    data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
-    motion_data_root=_os.path.join(_DATA_ROOT, "train/takes_clipped/assembly101"),
+    data_root=_os.path.join(_DATA_ROOT, "Assembly101/processed/train"),
+    motion_data_root=_os.path.join(_DATA_ROOT, "Assembly101/processed/train"),
     media_type="video_motion",
     normalize_motion=False,
 )
 
 train_file = [
-    available_corpus["video_motion_egoexo_test10"],       # EgoExo4D test (10)
-    available_corpus["video_motion_assembly101_train"],    # Assembly101 full (~3,405)
+    available_corpus["video_motion_train"],                # EgoExo4D (535 samples)
+    available_corpus["video_motion_assembly101_train"],     # Assembly101 (3,403 samples)
 ]
 
 test_file = dict(
-    video_motion_val=available_corpus["video_motion_val"],
     video_motion_assembly101_val=available_corpus["video_motion_assembly101_val"],
 )
-test_types = ["video_motion_val", "video_motion_assembly101_val"]
+test_types = ["video_motion_assembly101_val"]
 num_workers = 0  # sequential for debugging
 
 best_key = ["msrvtt_1k_test_match", "t2v_r1"]
@@ -127,7 +130,10 @@ model = dict(
         clip_norm_type='l2',
         clip_return_layer=6,
         clip_student_return_interval=1,
-        pretrained=_os.path.join(_WORK_DIR, "scripts/pretraining/stage1/1B_ft_k710_f8.pth"),
+        pretrained=(
+            _os.path.join(_CKPT_DIR, "1B_ft_k710_f8.pth") if _CKPT_DIR
+            else _os.path.join(_WORK_DIR, "scripts/pretraining/stage1/1B_ft_k710_f8.pth")
+        ),
         use_checkpoint=True,
         checkpoint_num=40,
         use_flash_attn=False,
@@ -149,8 +155,14 @@ model = dict(
     text_encoder="${TextEncoders[${text_enc}]}",
     motion_encoder=dict(
         d_model=768,
-        ckpt_path=_os.path.join(_WORK_DIR, "../../../BodyTokenize/ckpt_vq/ckpt_best.pt"),
-        vqvae_config=_os.path.join(_EGOHAND_DIR, "BodyTokenize/ckpt_vq/config.yaml"),
+        ckpt_path=(
+            _os.path.join(_CKPT_DIR, "BodyTokenize/ckpt_best.pt") if _CKPT_DIR
+            else _os.path.join(_BODYTOKENIZE_DIR, "ckpt_vq/ckpt_best.pt")
+        ),
+        vqvae_config=(
+            _os.path.join(_CKPT_DIR, "BodyTokenize/config.yaml") if _CKPT_DIR
+            else _os.path.join(_BODYTOKENIZE_DIR, "ckpt_vq/config.yaml")
+        ),
         freeze=True,
     ),
     multimodal=dict(enable=True),
