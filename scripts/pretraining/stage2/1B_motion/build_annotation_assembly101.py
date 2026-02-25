@@ -102,6 +102,6 @@ if __name__ == "__main__":
             _here, f"annotation_assembly101_{args.split}.json",
         )
 
-    data_root = os.path.join(_DATA_ROOT_BASE, "train/takes_clipped/assembly101")
+    data_root = os.path.join(_DATA_ROOT_BASE, "Assembly101/processed", args.split)
 
     build_annotation(args.intermediate_json, args.output, data_root)

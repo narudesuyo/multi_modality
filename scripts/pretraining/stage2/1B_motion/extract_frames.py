@@ -7,7 +7,7 @@ frame from each referenced MP4 using ffmpeg, and writes an updated annotation
 JSON whose "video" field points to a frame directory instead of an MP4.
 
 Output structure:
-  {DATA_ROOT}/{split}/takes_clipped/egoexo/frames_atomic/{take_name}/{sample_id}_ego/
+  {DATA_ROOT}/EgoExo4D/processed/{split}/frames_atomic/{take_name}/{sample_id}_ego/
       img00001.jpg  img00002.jpg  ...
 
 Usage:
@@ -114,7 +114,7 @@ def main():
     anno_out_path = HERE / f"annotation_atomic_{args.split}_frames.json"
     bad_list_path = HERE / f"bad_frames_{args.split}.txt"
 
-    data_root = DATA_ROOT / args.split / "takes_clipped" / "egoexo"
+    data_root = DATA_ROOT / "EgoExo4D" / "processed" / args.split
     frames_base = data_root / "frames_atomic"
 
     print(f"Split:       {args.split}")

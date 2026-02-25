@@ -73,9 +73,33 @@ bash scripts/abci/copy_egoexo4d_takes.sh --dry-run   # 確認
 bash scripts/abci/copy_egoexo4d_takes.sh              # 実行
 ```
 
-### Step 3: データ準備 (ABCI GPU ノード)
+### Step 3: データ準備 (ABCI)
 
-全パイプライン一括実行:
+Step 1-2, 4 は CPU のみなので `rt_HC` で十分。Step 3 だけ GPU (`rt_HG`) が必要。
+
+```bash
+# --- CPU ジョブ (Step 1, 2, 4) ---
+qrsh -g gch51606 -l rt_HC=1 -l h_rt=6:00:00
+
+export DATA_ROOT=/groups/gch51606/takehiko.ohkawa/tmp_data
+export BODYTOKENIZE_DIR=/home/ach18478ho/code/tmp_code/BodyTokenize
+
+bash scripts/abci/prepare_data.sh --step 1    # EgoExo4D frames + kp3d
+bash scripts/abci/prepare_data.sh --step 2    # Assembly101 frames + kp3d
+bash scripts/abci/prepare_data.sh --step 4    # Annotation JSON 生成
+```
+
+```bash
+# --- GPU ジョブ (Step 3) ---
+qrsh -g gch51606 -l rt_HG=1 -l h_rt=2:00:00
+
+export DATA_ROOT=/groups/gch51606/takehiko.ohkawa/tmp_data
+export BODYTOKENIZE_DIR=/home/ach18478ho/code/tmp_code/BodyTokenize
+
+bash scripts/abci/prepare_data.sh --step 3    # BodyTokenize (要 GPU)
+```
+
+全ステップ一括実行 (GPU ノード):
 
 ```bash
 qrsh -g gch51606 -l rt_HG=1 -l h_rt=6:00:00
@@ -84,15 +108,6 @@ export DATA_ROOT=/groups/gch51606/takehiko.ohkawa/tmp_data
 export BODYTOKENIZE_DIR=/home/ach18478ho/code/tmp_code/BodyTokenize
 
 bash scripts/abci/prepare_data.sh
-```
-
-ステップごとに実行する場合:
-
-```bash
-bash scripts/abci/prepare_data.sh --step 1    # EgoExo4D frames + kp3d
-bash scripts/abci/prepare_data.sh --step 2    # Assembly101 frames + kp3d
-bash scripts/abci/prepare_data.sh --step 3    # BodyTokenize (要 GPU)
-bash scripts/abci/prepare_data.sh --step 4    # Annotation JSON 生成
 ```
 
 ### Step 4: 学習ジョブ投入 (ABCI)

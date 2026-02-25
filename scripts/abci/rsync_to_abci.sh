@@ -28,10 +28,10 @@ LOCAL_DATA_ROOT="${LOCAL_DATA_ROOT:-/work/narus/data}"
 LOCAL_EGOHAND="/home/narus/2026/EgoHand"
 LOCAL_STAGE1="${LOCAL_EGOHAND}/InternVideo/InternVideo2/multi_modality/scripts/pretraining/stage1"
 LOCAL_BODYTOKENIZE="${LOCAL_EGOHAND}/BodyTokenize"
-LOCAL_ASSEMBLY101="/home/share/datasets/Assembly101"
+LOCAL_ASSEMBLY101="/home/share/datasets/Assembly101/data_motionlang"
 
-# Common rsync flags
-RSYNC_OPTS="-avhP --stats"
+# Common rsync flags (--bwlimit in KiB/s; 100000 ≈ 100 MB/s)
+RSYNC_OPTS="-avhP --stats --bwlimit=100000"
 
 # Pass --dry-run through
 DRY_RUN=""
@@ -66,18 +66,12 @@ rsync ${RSYNC_OPTS} ${DRY_RUN} \
     "${LOCAL_STAGE1}/1B_ft_k710_f8.pth" \
     "${ABCI_HOST}:${ABCI_DATA_ROOT}/1B_ft_k710_f8.pth"
 
-# ---- 4. BodyTokenize ckpt + config + statistics (~146 MB) ----
-echo "=== [4/5] BodyTokenize/ ==="
-# Create flat structure on ABCI: BodyTokenize/{ckpt_best.pt, config.yaml, statistics/}
+# ---- 4. BodyTokenize/ckpt_vq (~146 MB) ----
+echo "=== [4/5] BodyTokenize/ckpt_vq/ ==="
+ABCI_BODYTOKENIZE="/home/ach18478ho/code/tmp_code/BodyTokenize"
 rsync ${RSYNC_OPTS} ${DRY_RUN} \
-    "${LOCAL_BODYTOKENIZE}/ckpt_vq/ckpt_best.pt" \
-    "${ABCI_HOST}:${ABCI_DATA_ROOT}/BodyTokenize/ckpt_best.pt"
-rsync ${RSYNC_OPTS} ${DRY_RUN} \
-    "${LOCAL_BODYTOKENIZE}/ckpt_vq/config.yaml" \
-    "${ABCI_HOST}:${ABCI_DATA_ROOT}/BodyTokenize/config.yaml"
-rsync ${RSYNC_OPTS} ${DRY_RUN} \
-    "${LOCAL_BODYTOKENIZE}/ckpt_vq/statistics/" \
-    "${ABCI_HOST}:${ABCI_DATA_ROOT}/BodyTokenize/statistics/"
+    "${LOCAL_BODYTOKENIZE}/ckpt_vq/" \
+    "${ABCI_HOST}:${ABCI_BODYTOKENIZE}/ckpt_vq/"
 
 # ---- 5. Assembly101 raw data (~58 GB) ----
 echo "=== [5/5] Assembly101/ ==="

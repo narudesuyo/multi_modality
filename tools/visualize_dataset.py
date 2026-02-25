@@ -10,7 +10,7 @@ For each sample, saves:
 Usage:
     python tools/visualize_dataset.py \
         --ann scripts/pretraining/stage2/1B_motion/annotation_atomic_train.json \
-        --data-root /large/naru/EgoHand/data/train/takes_clipped/egoexo \
+        --data-root /work/narus/data/train/takes_clipped/egoexo \
         --output-dir ./vis_output \
         --num-samples 10
 """

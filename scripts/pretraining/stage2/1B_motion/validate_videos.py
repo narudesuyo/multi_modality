@@ -25,7 +25,7 @@ from pathlib import Path
 HERE = Path(__file__).parent
 WORK_DIR = HERE / "../../../.."
 PYTHON = str(WORK_DIR / ".conda/bin/python")
-DATA_ROOT = Path("/large/naru/EgoHand/data/train/takes_clipped/egoexo")
+DATA_ROOT = Path(os.environ.get("DATA_ROOT", "/work/narus/data")) / "EgoExo4D/processed/train"
 ANNO_FILE = HERE / "annotation_atomic_train.json"
 ANNO_OUT  = HERE / "annotation_atomic_train_validated.json"
 BAD_LIST  = HERE / "bad_videos.txt"

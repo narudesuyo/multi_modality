@@ -7,15 +7,21 @@
 #   3. BodyTokenize: VQ-VAE tokenization (inference_atomic.py)
 #   4. Final annotation JSON generation (build_annotation_*.py)
 #
-# Usage (run on ABCI GPU node):
-#   qrsh -g gch51606 -l rt_HG=1 -l h_rt=6:00:00
-#   bash scripts/abci/prepare_data.sh
+# Usage (run on ABCI):
 #
-# Steps can be run selectively:
-#   bash scripts/abci/prepare_data.sh --step 1      # EgoExo4D only
-#   bash scripts/abci/prepare_data.sh --step 2      # Assembly101 only
-#   bash scripts/abci/prepare_data.sh --step 3      # BodyTokenize only
-#   bash scripts/abci/prepare_data.sh --step 4      # Annotation only
+#   Step 1-2, 4 は CPU のみなので rt_HC で十分:
+#     qrsh -g gch51606 -l rt_HC=1 -l h_rt=6:00:00
+#     bash scripts/abci/prepare_data.sh --step 1    # EgoExo4D frames + kp3d
+#     bash scripts/abci/prepare_data.sh --step 2    # Assembly101 frames + kp3d
+#     bash scripts/abci/prepare_data.sh --step 4    # Annotation JSON
+#
+#   Step 3 は GPU が必要なので rt_HG:
+#     qrsh -g gch51606 -l rt_HG=1 -l h_rt=2:00:00
+#     bash scripts/abci/prepare_data.sh --step 3    # BodyTokenize (GPU)
+#
+#   全ステップ一括 (GPU ノード):
+#     qrsh -g gch51606 -l rt_HG=1 -l h_rt=6:00:00
+#     bash scripts/abci/prepare_data.sh
 #
 # Environment variables:
 #   DATA_ROOT         (default: /groups/gch51606/takehiko.ohkawa/tmp_data)

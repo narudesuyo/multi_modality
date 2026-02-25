@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """
-Prepare atomic-description-aligned 4-second clips for Stage2 training/val (SAFE version).
+Prepare atomic-description-aligned 4-second data for Stage2 training/val.
 
 For each atomic description timestamp (±2 sec):
-  1. Clip ego video from existing clipped videos
-  2. Clip exo video from full takes (best_exo camera)
-  3. Extract corresponding motion kp3d from ee_{split}_joints_tips.pt
-  4. Collect text descriptions
+  1. Extract exo video frames (best_exo camera) as JPG directly (no MP4 intermediate)
+  2. Extract corresponding motion kp3d from ee_{split}_joints_tips.pt
+  3. Collect text descriptions
 
-This SAFE version:
-  - Re-encodes clips (no -c:v copy) to avoid broken clips at non-keyframes
-  - Uses yuv420p + faststart for broad decoder compatibility (incl. decord)
-  - Optionally validates output clips with decord
-  - Writes bad list + filtered annotation
+By default only exo view is processed (--exo-only). Use --include-ego to also
+extract ego frames from pre-clipped videos.
 
 Usage:
-    python prepare_atomic_clips_safe.py --split train
-    python prepare_atomic_clips_safe.py --split val --validate
-    python prepare_atomic_clips_safe.py --split train --validate --skip-existing
+    python prepare_atomic_clips.py --split train --skip-existing
+    python prepare_atomic_clips.py --split val --skip-existing
+    python prepare_atomic_clips.py --split train --include-ego
 """
 
 import argparse
@@ -25,6 +21,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -34,7 +31,7 @@ import torch
 from tqdm import tqdm
 
 # ──────────────────────────────────────────────────────────────────────────────
-DATA_ROOT = os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data")
+DATA_ROOT = os.environ.get("DATA_ROOT", "/work/narus/data")
 
 FPS = 30
 HALF_WINDOW_SEC = 2.0
@@ -46,6 +43,24 @@ ENC_PRESET = "veryfast"      # you can change to ultrafast/fast
 ENC_CRF = "23"               # lower = higher quality/larger
 PIX_FMT = "yuv420p"
 MOVFLAGS = "+faststart"
+
+# Load-aware throttling: pause before spawning ffmpeg if system is busy.
+# 36 physical cores (2x Xeon Gold 6254); threshold at ~80%.
+LOAD_THRESHOLD = 40.0
+LOAD_CHECK_INTERVAL = 10  # seconds to sleep between checks
+
+FFMPEG_THREADS = 4
+
+# Resize short side to this value (preserving aspect ratio).
+# Set to 0 or None to disable resizing (keep original resolution).
+FRAME_SHORT_SIDE = 320
+
+
+def _wait_for_low_load() -> None:
+    """Block until 1-min load average drops below LOAD_THRESHOLD."""
+    while os.getloadavg()[0] > LOAD_THRESHOLD:
+        time.sleep(LOAD_CHECK_INTERVAL)
+
 
 # Use the same python as current interpreter for decord validation
 PYTHON = sys.executable
@@ -149,11 +164,12 @@ def clip_video_ffmpeg_safe(
         os.makedirs(log_dir, exist_ok=True)
         log_path = os.path.join(log_dir, Path(dst_path).name + ".ffmpeg.log")
 
-    # NOTE: put -ss AFTER -i for accurate seeking (slower but correct/safer)
+    # -ss BEFORE -i: keyframe-based seek (fast); minor frame offset is acceptable
+    # for 4-second clips.
     cmd = [
         "ffmpeg", "-y",
-        "-i", src_path,
         "-ss", f"{start_sec:.4f}",
+        "-i", src_path,
         "-t", f"{duration_sec:.4f}",
         "-an",
         "-c:v", ENC_CODEC,
@@ -161,6 +177,7 @@ def clip_video_ffmpeg_safe(
         "-crf", str(ENC_CRF),
         "-pix_fmt", PIX_FMT,
         "-movflags", MOVFLAGS,
+        "-threads", str(FFMPEG_THREADS),
         dst_path,
     ]
 
@@ -168,6 +185,7 @@ def clip_video_ffmpeg_safe(
         print(f"  [dry-run] {' '.join(cmd)}")
         return True
 
+    _wait_for_low_load()
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         if log_path is not None:
@@ -201,6 +219,69 @@ def clip_video_ffmpeg_safe(
                 os.remove(dst_path)
         except OSError:
             pass
+        return False
+
+
+def extract_frames_ffmpeg(
+    src_path: str,
+    dst_dir: str,
+    start_sec: float,
+    duration_sec: float,
+    quality: int = 2,
+    dry_run: bool = False,
+    log_dir: Optional[str] = None,
+) -> bool:
+    """Extract JPG frames directly from a video segment using ffmpeg.
+
+    Output: dst_dir/img00001.jpg, img00002.jpg, ...
+    Returns True if at least 1 frame was extracted.
+    """
+    os.makedirs(dst_dir, exist_ok=True)
+
+    log_path = None
+    if log_dir is not None:
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, Path(dst_dir).name + ".ffmpeg.log")
+
+    # -ss BEFORE -i: keyframe-based seek (fast).
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start_sec:.4f}",
+        "-i", src_path,
+        "-t", f"{duration_sec:.4f}",
+        "-an",
+    ]
+    if FRAME_SHORT_SIDE:
+        cmd += ["-vf", f"scale=-2:{FRAME_SHORT_SIDE}"]
+    cmd += [
+        "-q:v", str(quality),
+        "-threads", str(FFMPEG_THREADS),
+        os.path.join(dst_dir, "img%05d.jpg"),
+    ]
+
+    if dry_run:
+        print(f"  [dry-run] {' '.join(cmd)}")
+        return True
+
+    _wait_for_low_load()
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if log_path is not None:
+            with open(log_path, "w") as f:
+                f.write("CMD:\n" + " ".join(cmd) + "\n\n")
+                f.write("STDOUT:\n" + (r.stdout or "") + "\n\n")
+                f.write("STDERR:\n" + (r.stderr or "") + "\n")
+
+        if r.returncode != 0:
+            return False
+
+        # Check at least 1 frame was extracted
+        n_frames = len([f for f in os.listdir(dst_dir) if f.endswith(".jpg")])
+        return n_frames > 0
+
+    except subprocess.TimeoutExpired:
+        import shutil
+        shutil.rmtree(dst_dir, ignore_errors=True)
         return False
 
 
@@ -288,12 +369,29 @@ def main():
                         help="Seconds per output clip for decord validation (default 20)")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip if output files already exist")
+    parser.add_argument("--exo-only", action="store_true", default=True,
+                        help="Only clip exo video, skip ego (default: True)")
+    parser.add_argument("--include-ego", action="store_true",
+                        help="Also clip ego video (overrides --exo-only)")
     parser.add_argument("--require-both-videos", action="store_true",
                         help="Only keep samples that have BOTH ego and exo videos")
     parser.add_argument("--require-motion", action="store_true",
                         help="Only keep samples that have motion_kp3d")
     parser.add_argument("--motion-only", action="store_true",
                         help="Re-generate motion kp3d only (skip video clipping)")
+    parser.add_argument("--full-takes-dir", type=str, default=None,
+                        help="Directory containing full takes (for exo camera). "
+                             "Default: {DATA_ROOT}/EgoExo4D/takes")
+    parser.add_argument("--clipped-video-dir", type=str, default=None,
+                        help="Directory containing pre-clipped ego videos. "
+                             "Default: {DATA_ROOT}/EgoExo4D/processed/{split}/videos")
+    parser.add_argument("--output-base", type=str, default=None,
+                        help="Output base directory. "
+                             "Default: {DATA_ROOT}/EgoExo4D/processed/{split}")
+    parser.add_argument("--frames-dir-name", type=str, default="frames_atomic",
+                        help="Name of the frames subdirectory (default: frames_atomic). "
+                             "Use e.g. 'frames_atomic_320' to save resized frames "
+                             "separately from existing full-resolution frames.")
     args = parser.parse_args()
 
     here = Path(__file__).parent
@@ -313,16 +411,35 @@ def main():
     motion_pt_path = os.path.join(
         DATA_ROOT, "ee4d", "ee4d_motion_uniegomotion", "uniegomotion", f"ee_{args.split}_joints_tips.pt"
     )
-    clipped_video_dir = os.path.join(DATA_ROOT, args.split, "takes_clipped", "egoexo", "videos")
-    full_takes_dir = os.path.join(DATA_ROOT, args.split, "takes")
 
-    output_base = os.path.join(DATA_ROOT, args.split, "takes_clipped", "egoexo")
-    output_video_dir = os.path.join(output_base, "videos_atomic")
+    # Pre-clipped ego videos (may not exist for train split)
+    if args.clipped_video_dir is not None:
+        clipped_video_dir = args.clipped_video_dir
+    else:
+        clipped_video_dir = os.path.join(DATA_ROOT, "EgoExo4D", "processed", args.split, "videos")
+
+    # Full takes directory (same for all splits — raw data lives under EgoExo4D/)
+    if args.full_takes_dir is not None:
+        full_takes_dir = args.full_takes_dir
+    else:
+        full_takes_dir = os.path.join(DATA_ROOT, "EgoExo4D", "takes")
+
+    if args.output_base is not None:
+        output_base = args.output_base
+    else:
+        output_base = os.path.join(DATA_ROOT, "EgoExo4D", "processed", args.split)
+    frames_dir_name = args.frames_dir_name
+    output_frames_dir = os.path.join(output_base, frames_dir_name)
     output_motion_dir = os.path.join(output_base, "motion_atomic")
     ffmpeg_log_dir = os.path.join(output_base, "ffmpeg_logs_atomic")
 
+    # Resolve exo-only vs include-ego
+    exo_only = args.exo_only and not args.include_ego
+
     print(f"Split: {args.split}")
     print(f"DATA_ROOT: {DATA_ROOT}")
+    print(f"Frames dir: {frames_dir_name}")
+    print(f"Exo only: {exo_only}")
     print(f"Validate output: {args.validate} (timeout={args.validate_timeout}s)")
     print(f"Skip existing: {args.skip_existing}")
     print(f"Require both videos: {args.require_both_videos}")
@@ -416,17 +533,20 @@ def main():
                     "frame_end": frame_end,
                 }
 
-                # Outputs
-                ego_out = os.path.join(output_video_dir, take_name, f"{sample_id}_ego.mp4")
-                exo_out = os.path.join(output_video_dir, take_name, f"{sample_id}_exo.mp4")
-                ego_rel = os.path.join("videos_atomic", take_name, f"{sample_id}_ego.mp4")
-                exo_rel = os.path.join("videos_atomic", take_name, f"{sample_id}_exo.mp4")
+                # Outputs (JPG frames directories)
+                ego_frames_out = os.path.join(output_frames_dir, take_name, f"{sample_id}_ego")
+                exo_frames_out = os.path.join(output_frames_dir, take_name, f"{sample_id}_exo")
+                ego_rel = os.path.join(frames_dir_name, take_name, f"{sample_id}_ego")
+                exo_rel = os.path.join(frames_dir_name, take_name, f"{sample_id}_exo")
 
-                # ── Ego clip ────────────────────────────────────────────────
+                # ── Ego frames ──────────────────────────────────────────────
                 ego_ok = False
-                if args.motion_only:
-                    # In motion-only mode, check if ego video already exists
-                    if os.path.exists(ego_out) and os.path.getsize(ego_out) > 1024:
+                if exo_only:
+                    pass  # skip ego entirely
+                elif args.motion_only:
+                    if os.path.isdir(ego_frames_out) and any(
+                        f.endswith(".jpg") for f in os.listdir(ego_frames_out)
+                    ):
                         ego_ok = True
                         entry["video_ego"] = ego_rel
                         stats["ego_ok"] += 1
@@ -438,20 +558,19 @@ def main():
                         rel_start_sec = max(0.0, (frame_start - clip_start) / FPS)
                         duration_sec = (frame_end - frame_start) / FPS
 
-                        # Clamp duration not to exceed the source ego clip
                         max_duration = (clip_end - clip_start) / FPS - rel_start_sec
                         duration_sec = max(0.0, min(duration_sec, max_duration))
 
-                        if duration_sec >= 0.2:  # avoid extremely short clips
-                            if args.skip_existing and os.path.exists(ego_out) and os.path.getsize(ego_out) > 1024:
+                        if duration_sec >= 0.2:
+                            if args.skip_existing and os.path.isdir(ego_frames_out) and any(
+                                f.endswith(".jpg") for f in os.listdir(ego_frames_out)
+                            ):
                                 ego_ok = True
                                 stats["skipped_existing"] += 1
                             else:
-                                ego_ok = clip_video_ffmpeg_safe(
-                                    clip_path, ego_out, rel_start_sec, duration_sec,
+                                ego_ok = extract_frames_ffmpeg(
+                                    clip_path, ego_frames_out, rel_start_sec, duration_sec,
                                     dry_run=args.dry_run,
-                                    validate=args.validate,
-                                    validate_timeout=args.validate_timeout,
                                     log_dir=ffmpeg_log_dir,
                                 )
                             if ego_ok:
@@ -459,7 +578,7 @@ def main():
                                 stats["ego_ok"] += 1
                             else:
                                 stats["bad_output_clip"] += 1
-                                bad_samples.append(f"{take_name}/{sample_id} ego ffmpeg/decord failed")
+                                bad_samples.append(f"{take_name}/{sample_id} ego ffmpeg failed")
                         else:
                             stats["bad_output_clip"] += 1
                             bad_samples.append(f"{take_name}/{sample_id} ego too_short duration={duration_sec:.3f}")
@@ -467,10 +586,12 @@ def main():
                         stats["no_ego_clip"] += 1
                         bad_samples.append(f"{take_name}/{sample_id} no_ego_clip")
 
-                # ── Exo clip ────────────────────────────────────────────────
+                # ── Exo frames ──────────────────────────────────────────────
                 exo_ok = False
                 if args.motion_only:
-                    if os.path.exists(exo_out) and os.path.getsize(exo_out) > 1024:
+                    if os.path.isdir(exo_frames_out) and any(
+                        f.endswith(".jpg") for f in os.listdir(exo_frames_out)
+                    ):
                         exo_ok = True
                         entry["video_exo"] = exo_rel
                         stats["exo_ok"] += 1
@@ -480,15 +601,15 @@ def main():
                         exo_start_sec = max(0.0, frame_start / FPS)
                         exo_duration = (frame_end - frame_start) / FPS
                         if exo_duration >= 0.2:
-                            if args.skip_existing and os.path.exists(exo_out) and os.path.getsize(exo_out) > 1024:
+                            if args.skip_existing and os.path.isdir(exo_frames_out) and any(
+                                f.endswith(".jpg") for f in os.listdir(exo_frames_out)
+                            ):
                                 exo_ok = True
                                 stats["skipped_existing"] += 1
                             else:
-                                exo_ok = clip_video_ffmpeg_safe(
-                                    exo_src, exo_out, exo_start_sec, exo_duration,
+                                exo_ok = extract_frames_ffmpeg(
+                                    exo_src, exo_frames_out, exo_start_sec, exo_duration,
                                     dry_run=args.dry_run,
-                                    validate=args.validate,
-                                    validate_timeout=args.validate_timeout,
                                     log_dir=ffmpeg_log_dir,
                                 )
                             if exo_ok:
@@ -496,7 +617,7 @@ def main():
                                 stats["exo_ok"] += 1
                             else:
                                 stats["bad_output_clip"] += 1
-                                bad_samples.append(f"{take_name}/{sample_id} exo ffmpeg/decord failed cam={exo_cam_id}")
+                                bad_samples.append(f"{take_name}/{sample_id} exo ffmpeg failed cam={exo_cam_id}")
                         else:
                             stats["bad_output_clip"] += 1
                             bad_samples.append(f"{take_name}/{sample_id} exo too_short duration={exo_duration:.3f}")

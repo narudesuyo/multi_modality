@@ -37,7 +37,7 @@ from tqdm import tqdm
 # Defaults
 DATA_ROOT = os.environ.get("DATA_ROOT", "/work/narus/data")
 ASSEMBLY_ROOT = os.path.join(DATA_ROOT, "Assembly101")
-OUTPUT_ROOT = os.path.join(DATA_ROOT, "train/takes_clipped/assembly101")
+OUTPUT_ROOT = os.path.join(DATA_ROOT, "Assembly101/processed/train")
 MODEL_PATH = os.environ.get(
     "SMPLH_MODEL_PATH",
     "/home/narus/2026/EgoHand/BodyTokenize/models/smplx",
@@ -240,7 +240,8 @@ def main():
     parser.add_argument("--split", default="train",
                         choices=["train", "validation", "test"])
     parser.add_argument("--assembly-root", default=ASSEMBLY_ROOT)
-    parser.add_argument("--output-root", default=OUTPUT_ROOT)
+    parser.add_argument("--output-root", default=None,
+                        help="Output root dir. Default: {DATA_ROOT}/Assembly101/processed/{split}")
     parser.add_argument("--model-path", default=MODEL_PATH,
                         help="Directory containing smplh/ with SMPLH_NEUTRAL.npz")
     parser.add_argument("--device", default="cpu", help="cpu or cuda")
@@ -257,6 +258,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=256,
                         help="Batch size for SMPL-H forward kinematics")
     args = parser.parse_args()
+
+    if args.output_root is None:
+        args.output_root = os.path.join(DATA_ROOT, "Assembly101/processed", args.split)
 
     here = Path(__file__).parent
     csv_path = os.path.join(args.assembly_root, "text/v1", f"{args.split}.csv")

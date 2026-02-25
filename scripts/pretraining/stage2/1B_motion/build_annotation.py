@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-DATA_ROOT = os.path.join(os.environ.get("DATA_ROOT", "/large/naru/EgoHand/data"), "train/takes_clipped/egoexo")
+DATA_ROOT = os.path.join(os.environ.get("DATA_ROOT", "/work/narus/data"), "EgoExo4D/processed/train")
 VIDEO_DIR = os.path.join(DATA_ROOT, "videos")
 
 DUMMY_CAPTIONS = [
