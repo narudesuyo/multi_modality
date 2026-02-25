@@ -72,13 +72,11 @@ for split in ["train", "val"]:
         desc_data = json.load(f)
 
     # Collect unique take_names from annotations
+    # annotations is a dict: {take_uid: [anno_objects, ...]}
     take_names = set()
-    annotations = desc_data.get("annotations", desc_data) if isinstance(desc_data, dict) else desc_data
-    if isinstance(annotations, dict):
-        annotations = annotations.get("annotations", [])
+    annotations = desc_data.get("annotations", {})
 
-    for ann in annotations:
-        take_uid = ann.get("take_uid", "")
+    for take_uid in annotations:
         take_name = uuid_to_take.get(take_uid)
         if take_name:
             take_names.add(take_name)
