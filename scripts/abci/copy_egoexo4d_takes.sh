@@ -20,7 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 DATA_ROOT="${DATA_ROOT:-/groups/gch51606/takehiko.ohkawa/tmp_data}"
-SRC_TAKES_DIR="${SRC_TAKES_DIR:-/groups/gch51606/dataset/egoexo4d/takes}"
+SRC_TAKES_DIR="${SRC_TAKES_DIR:-/groups/gch51606/dataset/egoexo4d/raw/takes}"
 DST_TAKES_DIR="${DATA_ROOT}/EgoExo4D/takes"
 
 DRY_RUN=""

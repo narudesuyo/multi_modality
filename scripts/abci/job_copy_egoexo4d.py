@@ -61,7 +61,7 @@ class CopyEgoExo4DConfig:
     # DATA_ROOT for dataset paths.
     data_root: str = "/groups/gch51606/takehiko.ohkawa/tmp_data"
     # Source takes directory in ABCI shared storage.
-    src_takes_dir: str = "/groups/gch51606/dataset/egoexo4d/takes"
+    src_takes_dir: str = "/groups/gch51606/dataset/egoexo4d/raw/takes"
 
     # ---- Environment ----
     # Conda environment prefix. Set to empty string to skip conda activation.
