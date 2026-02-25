@@ -135,11 +135,13 @@ for split in train val; do
         else
             echo "  [${COUNT}/${TOTAL}] Copying: ${take_name}"
             # Copy only frame_aligned_videos (the only subdir needed for exo frames)
-            mkdir -p "${DST}/frame_aligned_videos"
-            cp -a "${SRC}/frame_aligned_videos/." "${DST}/frame_aligned_videos/" 2>/dev/null || {
+            if [[ -d "${SRC}/frame_aligned_videos" ]]; then
+                mkdir -p "${DST}/frame_aligned_videos"
+                cp -a "${SRC}/frame_aligned_videos/." "${DST}/frame_aligned_videos/"
+            else
                 echo "    WARN: frame_aligned_videos not found in ${take_name}, copying entire take"
-                cp -a "${SRC}" "${DST}"
-            }
+                cp -a "${SRC}/." "${DST}/"
+            fi
         fi
     done <<< "${TAKE_NAMES}"
 done
