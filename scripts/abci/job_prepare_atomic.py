@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 class PrepareAtomicConfig:
     """ABCI PBS job configuration for prepare_atomic_clips.py."""
 
-    # PBS queue name.
-    queue: str = "rt_HG"
+    # PBS queue name (CPU node is sufficient — no GPU needed).
+    queue: str = "rt_HC"
     # ABCI project group.
     project: str = "gch51606"
     # Number of compute nodes (-l select=N).
