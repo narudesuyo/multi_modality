@@ -49,6 +49,25 @@
 
 ## 変更履歴
 
+### 2026-02-26
+
+- **BodyTokenize 内の Y-up / fingertip スクリプトを確認**
+  - Y-up 変換: `BodyTokenize/motion_representation.py` と `BodyTokenize/preprocess/motion_representation.py` に `axis_stats()` / `pick_up_axis()` / `to_y_up()` / `unify_clip_to_y_up()` が実装済み
+  - 指先生成: `BodyTokenize/preprocess/smplx2joints.py` に `append_fingertips_from_vertices()`（SMPL-X 頂点から 10 tips を追加）
+  - 指先を含む kinematic chain: `BodyTokenize/paramUtil_add_tips.py`
+- **Assembly101 + EgoExo4D 共通の motion preprocess を追加**
+  - 追加: `scripts/pretraining/stage2/1B_motion/motion_preprocess.py`
+  - 処理内容: Y-up 自動推定 + Z-forward への yaw 回転
+  - 適用箇所: `prepare_atomic_clips.py`, `prepare_assembly101_clips.py` の kp3d 保存直前
+  - フラグ: `--no-y-up`, `--no-z-forward` で無効化可能（デフォルト有効）
+- **Assembly101 の SMPL-H に tips を付与できるように拡張**
+  - `prepare_assembly101_clips.py` に `--add-tips` を追加
+  - `smplx.vertex_ids` から `smplh`/`smplx` の指先頂点を取得して kp3d 末尾 10 点に追加
+- **EgoExo4D の kp3d を BodyTokenize 相当で正規化**
+  - 追加: `scripts/pretraining/stage2/1B_motion/normalize_egoexo_kp3d.py`
+  - 処理: Z-up→Y-up、floor、root center、face Z+
+  - 出力: `EgoExo4D/processed/train/motion_atomic` を上書き
+
 ### 2026-02-25
 
 - **`rsync_to_abci.sh`: Assembly101 のローカルパスを修正**

@@ -31,6 +31,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from motion_preprocess import preprocess_kp3d
+
 # ──────────────────────────────────────────────────────────────────────────────
 DATA_ROOT = os.environ.get("DATA_ROOT", "/work/narus/data")
 
@@ -328,19 +330,15 @@ def extract_motion_slice(
         return None
 
     # Proportional mapping from absolute frames to kp3d indices
-    def to_idx(abs_f: int) -> float:
+    def to_idx(abs_f: float) -> float:
         x = (abs_f - clip_start) / float(total_clip_frames)
         return x * num_frames
 
-    src_start = to_idx(abs_frame_start)
-    src_end = to_idx(abs_frame_end)
-
-    # clamp
-    src_start = max(0.0, min(src_start, num_frames - 1.0))
-    src_end = max(src_start + 0.01, min(src_end, float(num_frames)))
-
-    # Resample to exactly TARGET_MOTION_FRAMES via linear interpolation
-    sample_pts = np.linspace(src_start, src_end - 1e-6, TARGET_MOTION_FRAMES)
+    # Resample to exactly TARGET_MOTION_FRAMES via linear interpolation.
+    # If requested window goes beyond motion clip, pad with edge frames.
+    abs_pts = np.linspace(abs_frame_start, abs_frame_end, TARGET_MOTION_FRAMES)
+    sample_pts = np.array([to_idx(a) for a in abs_pts], dtype=np.float32)
+    sample_pts = np.clip(sample_pts, 0.0, num_frames - 1.0)
     T, J, C = kp3d.shape
     out = np.empty((TARGET_MOTION_FRAMES, J, C), dtype=np.float32)
     for i, pt in enumerate(sample_pts):
@@ -396,6 +394,13 @@ def main():
     parser.add_argument("--num-workers", type=int, default=1,
                         help="Number of parallel workers for processing takes (default: 1). "
                              "Set to e.g. 16 to parallelize ffmpeg across takes.")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="Process only first N samples (0 = all)")
+    parser.add_argument("--no-y-up", dest="y_up", action="store_false",
+                        help="Disable Y-up normalization for kp3d")
+    parser.add_argument("--no-z-forward", dest="z_forward", action="store_false",
+                        help="Disable Z-forward normalization for kp3d")
+    parser.set_defaults(y_up=True, z_forward=True)
     args = parser.parse_args()
 
     here = Path(__file__).parent
@@ -500,6 +505,7 @@ def main():
 
     results = []
     bad_samples = []  # store sample_id and reason
+    max_samples = args.limit if args.limit and args.limit > 0 else None
 
     stats = {
         "total_descriptions": 0,
@@ -520,6 +526,7 @@ def main():
         local_results = []
         local_bad = []
         local_stats = {k: 0 for k in stats}
+        local_count = 0
 
         sample_idx = sample_offsets[take_uid]
         take_name = uuid_to_take.get(take_uid)
@@ -536,6 +543,8 @@ def main():
             descriptions = anno.get("descriptions", [])
 
             for desc in descriptions:
+                if max_samples is not None and local_count >= max_samples:
+                    return local_results, local_bad, local_stats
                 local_stats["total_descriptions"] += 1
 
                 timestamp = float(desc["timestamp"])  # seconds
@@ -659,6 +668,9 @@ def main():
                         _, _, m_key = motion_result
                         kp3d_slice = extract_motion_slice(motion_data, m_key, frame_start, frame_end)
                         if kp3d_slice is not None and kp3d_slice.shape[0] > 0:
+                            kp3d_slice, _info = preprocess_kp3d(
+                                kp3d_slice, do_y_up=args.y_up, do_z_forward=args.z_forward
+                            )
                             motion_out = os.path.join(output_motion_dir, take_name, f"{sample_id}_kp3d.npy")
                             motion_rel = os.path.join("motion_atomic", take_name, f"{sample_id}_kp3d.npy")
                             os.makedirs(os.path.dirname(motion_out), exist_ok=True)
@@ -690,6 +702,7 @@ def main():
                 entry["_motion_ok"] = bool(motion_ok)
 
                 local_results.append(entry)
+                local_count += 1
 
         return local_results, local_bad, local_stats
 
@@ -704,6 +717,8 @@ def main():
                 bad_samples.extend(local_bad)
                 for k in stats:
                     stats[k] += local_stats[k]
+                if max_samples is not None and stats["total_descriptions"] >= max_samples:
+                    break
     else:
         for item in tqdm(take_items, desc="Processing takes"):
             local_results, local_bad, local_stats = process_take(item)
@@ -711,6 +726,8 @@ def main():
             bad_samples.extend(local_bad)
             for k in stats:
                 stats[k] += local_stats[k]
+            if max_samples is not None and stats["total_descriptions"] >= max_samples:
+                break
 
     # ── Save intermediate annotation (keeps everything + ok flags) ────────────
     os.makedirs(os.path.dirname(os.path.abspath(args.output_json)), exist_ok=True)

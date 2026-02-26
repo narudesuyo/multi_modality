@@ -33,6 +33,8 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from motion_preprocess import preprocess_kp3d
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Defaults
 DATA_ROOT = os.environ.get("DATA_ROOT", "/work/narus/data")
@@ -83,7 +85,7 @@ def parse_csv(csv_path):
 # SMPL-H forward kinematics
 
 
-def setup_smplh_model(model_path, device="cpu"):
+def setup_smplh_model(model_path, device="cpu", flat_hand_mean=False):
     """Create SMPL-H body model for forward kinematics."""
     import smplx
 
@@ -94,11 +96,35 @@ def setup_smplh_model(model_path, device="cpu"):
         model_type="smplh",
         gender="male",
         use_pca=False,
-        flat_hand_mean=True,
+        flat_hand_mean=flat_hand_mean,
         batch_size=1,
     ).to(device)
     model.eval()
     return model
+
+
+def get_smplh_tip_vertex_ids():
+    """Get SMPL-H fingertip vertex indices from smplx.vertex_ids if available."""
+    try:
+        from smplx.vertex_ids import vertex_ids
+    except Exception:
+        return None
+
+    tip_names_l = ["lthumb", "lindex", "lmiddle", "lring", "lpinky"]
+    tip_names_r = ["rthumb", "rindex", "rmiddle", "rring", "rpinky"]
+
+    for model_key in ("smplh", "smplx"):
+        if model_key not in vertex_ids:
+            continue
+        vmap = vertex_ids[model_key]
+        try:
+            tips_l = [vmap[n] for n in tip_names_l]
+            tips_r = [vmap[n] for n in tip_names_r]
+        except KeyError:
+            continue
+        return tips_l + tips_r
+
+    return None
 
 
 def load_frame_params(motion_dir, session_id, frame_num):
@@ -110,7 +136,7 @@ def load_frame_params(motion_dir, session_id, frame_num):
         return json.load(f)
 
 
-def smplh_params_to_joints(model, params_list, device="cpu"):
+def smplh_params_to_joints(model, params_list, device="cpu", tip_vertex_ids=None):
     """Run SMPL-H forward kinematics on a batch of per-frame params.
 
     Args:
@@ -120,6 +146,7 @@ def smplh_params_to_joints(model, params_list, device="cpu"):
 
     Returns:
         joints: np.ndarray [T, 52, 3]
+        tips: np.ndarray [T, 10, 3] or None
     """
     T = len(params_list)
 
@@ -158,25 +185,34 @@ def smplh_params_to_joints(model, params_list, device="cpu"):
 
     # SMPL-H output.joints: [T, J, 3] where J >= 52
     # Take first 52: 22 body + 15 LH + 15 RH
-    joints = output.joints[:, :52, :].cpu().numpy()
-    return joints.astype(np.float32)
+    joints = output.joints[:, :52, :].cpu().numpy().astype(np.float32)
+
+    tips = None
+    if tip_vertex_ids is not None:
+        verts = output.vertices[:, tip_vertex_ids, :].cpu().numpy()
+        tips = verts.astype(np.float32)
+
+    return joints, tips
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Joint format conversion
 
 
-def joints52_to_kp3d154(joints_52):
+def joints52_to_kp3d154(joints_52, tips_10=None):
     """Map SMPL-H 52 joints → 154-joint kp3d format (matching EgoExo4D).
 
     SMPL-H:       [0:22] body, [22:37] LH, [37:52] RH
     EgoExo4D 154: [0:22] body, [22:25] jaw/eyes(zeros), [25:40] LH, [40:55] RH, [55:154] zeros
+    If tips_10 is provided, it is written to the last 10 joints.
     """
     T = joints_52.shape[0]
     kp3d = np.zeros((T, 154, 3), dtype=np.float32)
     kp3d[:, 0:22, :] = joints_52[:, 0:22, :]     # body
     kp3d[:, 25:40, :] = joints_52[:, 22:37, :]   # left hand
     kp3d[:, 40:55, :] = joints_52[:, 37:52, :]   # right hand
+    if tips_10 is not None:
+        kp3d[:, -10:, :] = tips_10
     return kp3d
 
 
@@ -262,6 +298,15 @@ def main():
     parser.add_argument("--output-json", type=str, default=None)
     parser.add_argument("--batch-size", type=int, default=256,
                         help="Batch size for SMPL-H forward kinematics")
+    parser.add_argument("--flat-hand-mean", action="store_true",
+                        help="Use flat hand mean (open hand). Default is False.")
+    parser.add_argument("--add-tips", action="store_true",
+                        help="Append fingertip vertices (if available) into kp3d last 10 joints")
+    parser.add_argument("--no-y-up", dest="y_up", action="store_false",
+                        help="Disable Y-up normalization for kp3d")
+    parser.add_argument("--no-z-forward", dest="z_forward", action="store_false",
+                        help="Disable Z-forward normalization for kp3d")
+    parser.set_defaults(y_up=True, z_forward=True)
     args = parser.parse_args()
 
     if args.output_root is None:
@@ -292,9 +337,14 @@ def main():
 
     # ── Setup SMPL-H model ───────────────────────────────────────────────────
     smplh_model = None
+    tip_vertex_ids = None
     if not args.skip_motion:
         print("Loading SMPL-H model...")
-        smplh_model = setup_smplh_model(args.model_path, args.device)
+        smplh_model = setup_smplh_model(args.model_path, args.device, flat_hand_mean=args.flat_hand_mean)
+        if args.add_tips:
+            tip_vertex_ids = get_smplh_tip_vertex_ids()
+            if tip_vertex_ids is None:
+                print("  [WARN] Tip vertex ids not found for SMPL-H; tips will be skipped.")
         print("  SMPL-H model loaded.")
 
     # ── Group by session for efficient motion loading ────────────────────────
@@ -403,21 +453,28 @@ def main():
                     if len(params_list) >= 2:
                         # FK in batches
                         all_joints = []
+                        all_tips = []
                         for bs in range(0, len(params_list), args.batch_size):
                             batch = params_list[bs : bs + args.batch_size]
-                            joints = smplh_params_to_joints(
-                                smplh_model, batch, args.device,
+                            joints, tips = smplh_params_to_joints(
+                                smplh_model, batch, args.device, tip_vertex_ids=tip_vertex_ids,
                             )
                             all_joints.append(joints)
+                            if tips is not None:
+                                all_tips.append(tips)
                         joints_52 = np.concatenate(all_joints, axis=0)
+                        tips_10 = np.concatenate(all_tips, axis=0) if all_tips else None
 
                         # Map to 154-joint format
-                        kp3d_154 = joints52_to_kp3d154(joints_52)
+                        kp3d_154 = joints52_to_kp3d154(joints_52, tips_10=tips_10)
 
                         # Resample to 41 frames (~10fps for 4-second window)
                         kp3d = resample_motion(kp3d_154, TARGET_MOTION_FRAMES)
 
                         if kp3d is not None:
+                            kp3d, _info = preprocess_kp3d(
+                                kp3d, do_y_up=args.y_up, do_z_forward=args.z_forward
+                            )
                             os.makedirs(os.path.dirname(motion_out), exist_ok=True)
                             np.save(motion_out, kp3d)
                             motion_ok = True
