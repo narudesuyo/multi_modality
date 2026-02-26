@@ -45,6 +45,11 @@ MODEL_PATH = os.environ.get(
 
 TARGET_MOTION_FRAMES = 41
 
+# Fixed 4-second window (matching EgoExo4D) for consistent ~10fps motion.
+SOURCE_FPS = 30
+CLIP_SEC = 4.0
+CLIP_HALF_FRAMES = int(CLIP_SEC / 2 * SOURCE_FPS)  # 60 frames
+
 # ──────────────────────────────────────────────────────────────────────────────
 # CSV parsing
 
@@ -320,12 +325,21 @@ def main():
         for sample_idx, sample in session_data:
             sample_id = f"{sample_idx:06d}"
 
+            # ── Fixed 4-second window centered on annotation ─────────
+            orig_start = sample["start_frame"]
+            orig_end = sample["end_frame"]
+            center_frame = (orig_start + orig_end) // 2
+            clip_start = max(0, center_frame - CLIP_HALF_FRAMES)
+            clip_end = center_frame + CLIP_HALF_FRAMES
+
             entry = {
                 "session_id": session_id,
                 "sample_id": sample_id,
                 "caption": sample["text"],
-                "start_frame": sample["start_frame"],
-                "end_frame": sample["end_frame"],
+                "start_frame": clip_start,
+                "end_frame": clip_end,
+                "orig_start_frame": orig_start,
+                "orig_end_frame": orig_end,
             }
 
             # ── Frame linking ────────────────────────────────────────────
@@ -348,8 +362,8 @@ def main():
                     src_dir = os.path.join(video_root, sample["video_path"])
                     n_frames = link_frames(
                         src_dir,
-                        sample["start_frame"],
-                        sample["end_frame"],
+                        clip_start,
+                        clip_end,
                         dst_frames_dir,
                         use_symlink=not args.copy_frames,
                     )
@@ -379,9 +393,9 @@ def main():
                     stats["motion_skip"] += 1
 
                 if not motion_ok:
-                    # Collect per-frame params from cache
+                    # Collect per-frame params from 4-second window
                     params_list = []
-                    for fn in range(sample["start_frame"], sample["end_frame"] + 1):
+                    for fn in range(clip_start, clip_end + 1):
                         p = session_motion_cache.get(fn)
                         if p is not None:
                             params_list.append(p)
@@ -400,7 +414,7 @@ def main():
                         # Map to 154-joint format
                         kp3d_154 = joints52_to_kp3d154(joints_52)
 
-                        # Resample to 41 frames
+                        # Resample to 41 frames (~10fps for 4-second window)
                         kp3d = resample_motion(kp3d_154, TARGET_MOTION_FRAMES)
 
                         if kp3d is not None:
