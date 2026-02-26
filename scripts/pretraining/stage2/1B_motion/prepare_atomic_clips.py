@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import subprocess
@@ -392,6 +393,9 @@ def main():
                         help="Name of the frames subdirectory (default: frames_atomic). "
                              "Use e.g. 'frames_atomic_320' to save resized frames "
                              "separately from existing full-resolution frames.")
+    parser.add_argument("--num-workers", type=int, default=1,
+                        help="Number of parallel workers for processing takes (default: 1). "
+                             "Set to e.g. 16 to parallelize ffmpeg across takes.")
     args = parser.parse_args()
 
     here = Path(__file__).parent
@@ -475,8 +479,25 @@ def main():
         for k in motion_keys_by_take:
             motion_keys_by_take[k].sort()
 
-    # ── Process annotations ────────────────────────────────────────────────
+    # ── Pre-compute sample index offsets per take ──────────────────────────
     annotations = atomic_data["annotations"]
+    take_items = list(annotations.items())
+
+    sample_offsets: dict[str, int] = {}
+    idx = 0
+    for t_uid, a_list in take_items:
+        sample_offsets[t_uid] = idx
+        for anno in a_list:
+            if anno.get("rejected", False):
+                continue
+            idx += len(anno.get("descriptions", []))
+
+    # Disable load throttling in parallel mode (dedicated PBS node)
+    if args.num_workers > 1:
+        global LOAD_THRESHOLD
+        LOAD_THRESHOLD = float('inf')
+        print(f"[INFO]: Parallel mode: {args.num_workers} workers, load throttling disabled")
+
     results = []
     bad_samples = []  # store sample_id and reason
 
@@ -493,14 +514,19 @@ def main():
         "bad_output_clip": 0,
     }
 
-    sample_idx = 0
+    def process_take(take_uid_and_annos):
+        """Process a single take: extract frames, motion, collect annotations."""
+        take_uid, anno_list = take_uid_and_annos
+        local_results = []
+        local_bad = []
+        local_stats = {k: 0 for k in stats}
 
-    for take_uid, anno_list in tqdm(annotations.items(), desc="Processing takes"):
+        sample_idx = sample_offsets[take_uid]
         take_name = uuid_to_take.get(take_uid)
         if take_name is None:
             for anno in anno_list:
-                stats["no_take_mapping"] += len(anno.get("descriptions", []))
-            continue
+                local_stats["no_take_mapping"] += len(anno.get("descriptions", []))
+            return local_results, local_bad, local_stats
 
         ego_clips = list_ego_clips(take_name, clipped_video_dir)
 
@@ -510,7 +536,7 @@ def main():
             descriptions = anno.get("descriptions", [])
 
             for desc in descriptions:
-                stats["total_descriptions"] += 1
+                local_stats["total_descriptions"] += 1
 
                 timestamp = float(desc["timestamp"])  # seconds
                 text = desc["text"]
@@ -539,7 +565,7 @@ def main():
                 ego_rel = os.path.join(frames_dir_name, take_name, f"{sample_id}_ego")
                 exo_rel = os.path.join(frames_dir_name, take_name, f"{sample_id}_exo")
 
-                # ── Ego frames ──────────────────────────────────────────────
+                # ── Ego frames ──────────────────────────────────────────
                 ego_ok = False
                 if exo_only:
                     pass  # skip ego entirely
@@ -549,7 +575,7 @@ def main():
                     ):
                         ego_ok = True
                         entry["video_ego"] = ego_rel
-                        stats["ego_ok"] += 1
+                        local_stats["ego_ok"] += 1
                 else:
                     ego_result = find_clip_for_frame(ego_clips, center_frame)
                     if ego_result is not None:
@@ -566,7 +592,7 @@ def main():
                                 f.endswith(".jpg") for f in os.listdir(ego_frames_out)
                             ):
                                 ego_ok = True
-                                stats["skipped_existing"] += 1
+                                local_stats["skipped_existing"] += 1
                             else:
                                 ego_ok = extract_frames_ffmpeg(
                                     clip_path, ego_frames_out, rel_start_sec, duration_sec,
@@ -575,18 +601,18 @@ def main():
                                 )
                             if ego_ok:
                                 entry["video_ego"] = ego_rel
-                                stats["ego_ok"] += 1
+                                local_stats["ego_ok"] += 1
                             else:
-                                stats["bad_output_clip"] += 1
-                                bad_samples.append(f"{take_name}/{sample_id} ego ffmpeg failed")
+                                local_stats["bad_output_clip"] += 1
+                                local_bad.append(f"{take_name}/{sample_id} ego ffmpeg failed")
                         else:
-                            stats["bad_output_clip"] += 1
-                            bad_samples.append(f"{take_name}/{sample_id} ego too_short duration={duration_sec:.3f}")
+                            local_stats["bad_output_clip"] += 1
+                            local_bad.append(f"{take_name}/{sample_id} ego too_short duration={duration_sec:.3f}")
                     else:
-                        stats["no_ego_clip"] += 1
-                        bad_samples.append(f"{take_name}/{sample_id} no_ego_clip")
+                        local_stats["no_ego_clip"] += 1
+                        local_bad.append(f"{take_name}/{sample_id} no_ego_clip")
 
-                # ── Exo frames ──────────────────────────────────────────────
+                # ── Exo frames ──────────────────────────────────────────
                 exo_ok = False
                 if args.motion_only:
                     if os.path.isdir(exo_frames_out) and any(
@@ -594,7 +620,7 @@ def main():
                     ):
                         exo_ok = True
                         entry["video_exo"] = exo_rel
-                        stats["exo_ok"] += 1
+                        local_stats["exo_ok"] += 1
                 else:
                     exo_src = find_exo_video(take_name, exo_cam_id, full_takes_dir)
                     if exo_src is not None:
@@ -605,7 +631,7 @@ def main():
                                 f.endswith(".jpg") for f in os.listdir(exo_frames_out)
                             ):
                                 exo_ok = True
-                                stats["skipped_existing"] += 1
+                                local_stats["skipped_existing"] += 1
                             else:
                                 exo_ok = extract_frames_ffmpeg(
                                     exo_src, exo_frames_out, exo_start_sec, exo_duration,
@@ -614,18 +640,18 @@ def main():
                                 )
                             if exo_ok:
                                 entry["video_exo"] = exo_rel
-                                stats["exo_ok"] += 1
+                                local_stats["exo_ok"] += 1
                             else:
-                                stats["bad_output_clip"] += 1
-                                bad_samples.append(f"{take_name}/{sample_id} exo ffmpeg failed cam={exo_cam_id}")
+                                local_stats["bad_output_clip"] += 1
+                                local_bad.append(f"{take_name}/{sample_id} exo ffmpeg failed cam={exo_cam_id}")
                         else:
-                            stats["bad_output_clip"] += 1
-                            bad_samples.append(f"{take_name}/{sample_id} exo too_short duration={exo_duration:.3f}")
+                            local_stats["bad_output_clip"] += 1
+                            local_bad.append(f"{take_name}/{sample_id} exo too_short duration={exo_duration:.3f}")
                     else:
-                        stats["no_exo_video"] += 1
-                        bad_samples.append(f"{take_name}/{sample_id} no_exo_video cam={exo_cam_id}")
+                        local_stats["no_exo_video"] += 1
+                        local_bad.append(f"{take_name}/{sample_id} no_exo_video cam={exo_cam_id}")
 
-                # ── Motion slice ────────────────────────────────────────────
+                # ── Motion slice ────────────────────────────────────────
                 motion_ok = False
                 if not args.dry_run:
                     motion_result = find_motion_key_for_frame(motion_keys_by_take, take_name, center_frame)
@@ -638,19 +664,19 @@ def main():
                             os.makedirs(os.path.dirname(motion_out), exist_ok=True)
                             np.save(motion_out, kp3d_slice)
                             entry["motion_kp3d"] = motion_rel
-                            stats["motion_ok"] += 1
+                            local_stats["motion_ok"] += 1
                             motion_ok = True
                         else:
-                            stats["no_motion_key"] += 1
-                            bad_samples.append(f"{take_name}/{sample_id} motion_slice_empty")
+                            local_stats["no_motion_key"] += 1
+                            local_bad.append(f"{take_name}/{sample_id} motion_slice_empty")
                     else:
-                        stats["no_motion_key"] += 1
-                        bad_samples.append(f"{take_name}/{sample_id} no_motion_key")
+                        local_stats["no_motion_key"] += 1
+                        local_bad.append(f"{take_name}/{sample_id} no_motion_key")
                 else:
                     # dry-run: assume motion ok
                     motion_ok = True
                     entry["motion_kp3d"] = os.path.join("motion_atomic", take_name, f"{sample_id}_kp3d.npy")
-                    stats["motion_ok"] += 1
+                    local_stats["motion_ok"] += 1
 
                 # Decide keep/drop
                 keep = True
@@ -663,10 +689,28 @@ def main():
                 entry["_exo_ok"] = bool(exo_ok)
                 entry["_motion_ok"] = bool(motion_ok)
 
-                results.append(entry)
-                if not keep:
-                    # mark as bad for clean set (but keep in intermediate)
-                    pass
+                local_results.append(entry)
+
+        return local_results, local_bad, local_stats
+
+    # ── Run processing (parallel or sequential) ───────────────────────────
+    if args.num_workers > 1:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.num_workers) as executor:
+            for local_results, local_bad, local_stats in tqdm(
+                executor.map(process_take, take_items),
+                total=len(take_items), desc="Processing takes"
+            ):
+                results.extend(local_results)
+                bad_samples.extend(local_bad)
+                for k in stats:
+                    stats[k] += local_stats[k]
+    else:
+        for item in tqdm(take_items, desc="Processing takes"):
+            local_results, local_bad, local_stats = process_take(item)
+            results.extend(local_results)
+            bad_samples.extend(local_bad)
+            for k in stats:
+                stats[k] += local_stats[k]
 
     # ── Save intermediate annotation (keeps everything + ok flags) ────────────
     os.makedirs(os.path.dirname(os.path.abspath(args.output_json)), exist_ok=True)

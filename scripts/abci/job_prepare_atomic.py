@@ -66,6 +66,8 @@ class PrepareAtomicConfig:
     split: str = "train"
     # Skip samples whose output files already exist.
     skip_existing: bool = True
+    # Number of parallel workers for processing takes.
+    num_workers: int = 16
 
     # ---- Data paths ----
     # DATA_ROOT for dataset paths.
@@ -125,6 +127,8 @@ def render_pbs_script(config: PrepareAtomicConfig, job_name: str) -> str:
     script_args = f"--split {config.split}"
     if config.skip_existing:
         script_args += " --skip-existing"
+    if config.num_workers > 1:
+        script_args += f" --num-workers {config.num_workers}"
 
     # --- Body ---
     body = textwrap.dedent(f"""\
