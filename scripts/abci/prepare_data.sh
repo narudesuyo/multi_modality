@@ -9,15 +9,21 @@
 #
 # Usage (run on ABCI):
 #
-#   Step 1-2, 4 は CPU のみなので rt_HC で十分:
+#   Step 1, 4 は CPU のみなので rt_HC で十分:
 #     qrsh -g gch51606 -l rt_HC=1 -l h_rt=6:00:00
 #     bash scripts/abci/prepare_data.sh --step 1    # EgoExo4D frames + kp3d
-#     bash scripts/abci/prepare_data.sh --step 2    # Assembly101 frames + kp3d
 #     bash scripts/abci/prepare_data.sh --step 4    # Annotation JSON
 #
-#   Step 3 は GPU が必要なので rt_HG:
-#     qrsh -g gch51606 -l rt_HG=1 -l h_rt=2:00:00
+#   Step 2, 3 は GPU が必要なので rt_HG:
+#     qrsh -g gch51606 -l rt_HG=1 -l h_rt=6:00:00
+#     bash scripts/abci/prepare_data.sh --step 2    # Assembly101 frames + kp3d (SMPL-H on GPU)
 #     bash scripts/abci/prepare_data.sh --step 3    # BodyTokenize (GPU)
+#
+#   Or use job submission scripts (recommended):
+#     python scripts/abci/job_prepare_atomic.py       # Step 1
+#     python scripts/abci/job_prepare_assembly101.py   # Step 2
+#     python scripts/abci/job_bodytokenize.py          # Step 3
+#     python scripts/abci/job_build_annotation.py      # Step 4
 #
 #   全ステップ一括 (GPU ノード):
 #     qrsh -g gch51606 -l rt_HG=1 -l h_rt=6:00:00

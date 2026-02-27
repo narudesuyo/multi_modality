@@ -84,7 +84,7 @@ test_file = dict(
     video_motion_assembly101_val=available_corpus["video_motion_assembly101_val"],
 )
 test_types = ["video_motion_assembly101_val"]
-num_workers = 0  # sequential for debugging
+num_workers = 4
 
 best_key = ["msrvtt_1k_test_match", "t2v_r1"]
 

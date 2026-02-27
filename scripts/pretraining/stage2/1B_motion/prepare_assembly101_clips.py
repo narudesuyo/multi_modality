@@ -300,13 +300,15 @@ def main():
                         help="Batch size for SMPL-H forward kinematics")
     parser.add_argument("--flat-hand-mean", action="store_true",
                         help="Use flat hand mean (open hand). Default is False.")
-    parser.add_argument("--add-tips", action="store_true",
+    parser.add_argument("--add-tips", dest="add_tips", action="store_true",
                         help="Append fingertip vertices (if available) into kp3d last 10 joints")
+    parser.add_argument("--no-add-tips", dest="add_tips", action="store_false",
+                        help="Do not append fingertip vertices into kp3d")
     parser.add_argument("--no-y-up", dest="y_up", action="store_false",
                         help="Disable Y-up normalization for kp3d")
     parser.add_argument("--no-z-forward", dest="z_forward", action="store_false",
                         help="Disable Z-forward normalization for kp3d")
-    parser.set_defaults(y_up=True, z_forward=True)
+    parser.set_defaults(y_up=True, z_forward=True, add_tips=True)
     args = parser.parse_args()
 
     if args.output_root is None:

@@ -274,6 +274,8 @@ def parse_args():
     p.add_argument("--num-samples", type=int, default=5)
     p.add_argument("--vqvae-config", default=os.path.join(_BODY_TOKENIZE_ROOT, "ckpt_vq/config.yaml"))
     p.add_argument("--vqvae-ckpt", default=os.path.join(_BODY_TOKENIZE_ROOT, "ckpt_vq/ckpt_best.pt"))
+    p.add_argument("--kp3d-raw-axis", action="store_true",
+                   help="Display kp3d without Y-up conversion (raw axes for kp3d panel only)")
     p.add_argument("--device", default="cuda")
     p.add_argument("--motion-fps", type=int, default=10)
     p.add_argument("--view", default="all", choices=["all", "body", "hands", "lh", "rh"])
@@ -316,6 +318,10 @@ def main():
         kp3d_path = os.path.join(motion_data_root, kp3d_rel)
         try:
             kp3d_joints = kp3d_to_joints(kp3d_path, include_ft)
+            if args.kp3d_raw_axis:
+                # visualize_two_motions assumes Y-up and swaps (x,z,y) for plotting.
+                # Pre-swap to keep raw axes in the kp3d panel.
+                kp3d_joints = kp3d_joints[..., [0, 2, 1]]
             visualize_two_motions(
                 j_gt=kp3d_joints,
                 j_pr=kp3d_joints,
@@ -325,7 +331,7 @@ def main():
                 rotate=False,
                 include_fingertips=include_ft,
                 only_gt=True,
-                origin_align=True,
+                origin_align=not args.kp3d_raw_axis,
                 base_idx=base_idx,
             )
         except Exception as e:
